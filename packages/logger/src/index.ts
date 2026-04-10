@@ -41,16 +41,12 @@ function formatTimestamp(): string {
   return new Date().toISOString();
 }
 
-function stringifyError(error: unknown): unknown {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    };
-  }
-
-  return error;
+function serializeError(error: Error) {
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack
+  };
 }
 
 function normalizeMeta(meta?: LogMeta): LogMeta | undefined {
@@ -61,7 +57,7 @@ function normalizeMeta(meta?: LogMeta): LogMeta | undefined {
   return JSON.parse(
     JSON.stringify(meta, (_key, value) => {
       if (value instanceof Error) {
-        return stringifyError(value);
+        return serializeError(value);
       }
 
       return value;
@@ -69,7 +65,7 @@ function normalizeMeta(meta?: LogMeta): LogMeta | undefined {
   ) as LogMeta;
 }
 
-function getLevelColor(level: LogLevel): string {
+function colorFor(level: LogLevel): string {
   switch (level) {
     case 'debug':
       return ANSI.cyan;
@@ -83,7 +79,7 @@ function getLevelColor(level: LogLevel): string {
 }
 
 function formatLevel(level: LogLevel): string {
-  return `${getLevelColor(level)}${level.toUpperCase().padEnd(5)}${ANSI.reset}`;
+  return `${colorFor(level)}${level.toUpperCase().padEnd(5)}${ANSI.reset}`;
 }
 
 function formatMetaInline(meta?: LogMeta): string {
@@ -93,7 +89,6 @@ function formatMetaInline(meta?: LogMeta): string {
 
   const parts = Object.entries(meta).map(([key, value]) => {
     const rendered = typeof value === 'string' ? value : JSON.stringify(value);
-
     return `${ANSI.gray}${key}${ANSI.reset}=${rendered}`;
   });
 
@@ -152,15 +147,12 @@ export const logger = {
   debug(message: string, meta?: LogMeta): void {
     write('debug', message, meta);
   },
-
   info(message: string, meta?: LogMeta): void {
     write('info', message, meta);
   },
-
   warn(message: string, meta?: LogMeta): void {
     write('warn', message, meta);
   },
-
   error(message: string, meta?: LogMeta): void {
     write('error', message, meta);
   }

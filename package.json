@@ -32,8 +32,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
+    "build": "turbo run build",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint -- --fix",
     "typecheck": "turbo run typecheck",
@@ -41,6 +41,7 @@
     "clean": "turbo run clean",
     "format": "prettier --write \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
+    "dev:rtsp-ws-bridge": "pnpm --filter @ad-stream-bridge/rtsp-ws-bridge dev",
     "prepare": "husky",
     "commit": "git-cz"
   },

@@ -7,7 +7,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
   res.on('finish', () => {
     const durationMs = Date.now() - startAt;
 
-    logger.info('http request completed', {
+    logger.info('request completed', {
       method: req.method,
       path: req.originalUrl,
       statusCode: res.statusCode,

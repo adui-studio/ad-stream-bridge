@@ -1,5 +1,5 @@
-import { createApp } from './app.js';
 import { logger } from '@adui/logger';
+import { createApp } from './app.js';
 
 const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 3000;

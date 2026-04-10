@@ -6,5 +6,10 @@
     "base.json",
     "node.json",
     "vite.json"
-  ]
+  ],
+  "scripts": {
+    "lint": "node -e \"console.log('No lint task for @adui/typescript-config')\"",
+    "typecheck": "node -e \"console.log('No typecheck task for @adui/typescript-config')\"",
+    "test": "node -e \"console.log('No tests yet for @adui/typescript-config')\""
+  }
 }

@@ -8,15 +8,16 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node -e \"console.log('No tests yet for @adui/logger')\"",
     "clean": "rimraf dist"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "rimraf": "^6.1.3",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "@adui/typescript-config": "workspace:*"
   }
 }

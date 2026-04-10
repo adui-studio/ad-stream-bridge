@@ -9,6 +9,11 @@
     "node.js",
     "prettier.js"
   ],
+  "scripts": {
+    "lint": "node -e \"console.log('No lint task for @adui/eslint-config')\"",
+    "typecheck": "node -e \"console.log('No typecheck task for @adui/eslint-config')\"",
+    "test": "node -e \"console.log('No tests yet for @adui/eslint-config')\""
+  },
   "peerDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.58.1",
     "@typescript-eslint/parser": "^8.58.1",
