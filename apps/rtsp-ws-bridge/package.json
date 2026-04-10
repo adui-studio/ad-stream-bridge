@@ -1,0 +1,35 @@
+{
+  "name": "@ad-stream-bridge/rtsp-ws-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Express service for the RTSP to WebSocket-FLV bridge.",
+  "keywords": [
+    "ad-stream-bridge",
+    "rtsp",
+    "websocket",
+    "flv",
+    "express",
+    "nodejs",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No tests yet for @ad-stream-bridge/rtsp-ws-bridge')\"",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "rimraf": "^6.1.3",
+    "tsx": "^4.21.0",
+    "@adui/typescript-config": "workspace:*"
+  }
+}
