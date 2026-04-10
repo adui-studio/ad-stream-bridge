@@ -1,0 +1,80 @@
+{
+  "name": "ad-stream-bridge",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "description": "A protocol bridge service for live media streams.",
+  "keywords": [
+    "adui-studio",
+    "stream-bridge",
+    "streaming",
+    "media-streaming",
+    "rtsp",
+    "websocket",
+    "flv",
+    "ffmpeg",
+    "bridge-service",
+    "nodejs"
+  ],
+  "homepage": "https://github.com/adui-studio/ad-stream-bridge",
+  "bugs": {
+    "url": "https://github.com/adui-studio/ad-stream-bridge/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adui-studio/ad-stream-bridge.git"
+  },
+  "author": "adui-studio",
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "format": "prettier --write \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
+    "prepare": "husky",
+    "commit": "git-cz"
+  },
+  "config": {
+    "commitizen": {
+      "path": "node_modules/cz-git"
+    }
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.{ts,tsx,js,mjs,cjs}": [
+      "eslint --fix"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
+    "commitizen": "^4.3.1",
+    "cz-git": "^1.12.0",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-n": "^17.24.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-promise": "^7.2.1",
+    "globals": "^17.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.2",
+    "turbo": "^2.8.21",
+    "typescript": "^6.0.2"
+  }
+}
