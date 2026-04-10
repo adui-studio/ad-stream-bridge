@@ -23,7 +23,8 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "@adui/logger": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

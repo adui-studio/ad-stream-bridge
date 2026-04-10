@@ -1,4 +1,6 @@
 import express, { type Application, type Request, type Response } from 'express';
+import { logger } from '@adui/logger';
+import { requestLogger } from './middleware/request-logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 
 export function createApp(): Application {
@@ -6,6 +8,7 @@ export function createApp(): Application {
 
   app.disable('x-powered-by');
   app.use(express.json());
+  app.use(requestLogger);
 
   app.get('/', (_req: Request, res: Response) => {
     res.status(200).json({
@@ -16,9 +19,18 @@ export function createApp(): Application {
     });
   });
 
+  app.get('/error-test', () => {
+    throw new Error('intentional test error');
+  });
+
   registerHealthRoutes(app);
 
   app.use((req: Request, res: Response) => {
+    logger.warn('route not found', {
+      method: req.method,
+      path: req.originalUrl
+    });
+
     res.status(404).json({
       ok: false,
       error: 'Not Found',
@@ -27,11 +39,17 @@ export function createApp(): Application {
     });
   });
 
-  app.use((error: unknown, _req: Request, res: Response) => {
+  app.use((error: unknown, req: Request, res: Response) => {
+    logger.error('unhandled application error', {
+      method: req.method,
+      path: req.originalUrl,
+      error
+    });
+
     res.status(500).json({
       ok: false,
       error: 'Internal Server Error',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Unexpected server error',
       timestamp: new Date().toISOString()
     });
   });

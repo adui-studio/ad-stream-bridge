@@ -1,4 +1,5 @@
 import { createApp } from './app.js';
+import { logger } from '@adui/logger';
 
 const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 3000;
@@ -29,27 +30,18 @@ async function bootstrap(): Promise<void> {
   const host = getHost();
 
   app.listen(port, host, () => {
-    console.log(
-      JSON.stringify({
-        level: 'info',
-        message: 'rtsp-ws-bridge started',
-        host,
-        port,
-        timestamp: new Date().toISOString()
-      })
-    );
+    logger.info('rtsp-ws-bridge started', {
+      host,
+      port,
+      nodeEnv: process.env.NODE_ENV || 'development'
+    });
   });
 }
 
 bootstrap().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      message: 'failed to bootstrap rtsp-ws-bridge',
-      error: error instanceof Error ? error.message : String(error),
-      timestamp: new Date().toISOString()
-    })
-  );
+  logger.error('failed to bootstrap rtsp-ws-bridge', {
+    error
+  });
 
   process.exit(1);
 });
