@@ -1,8 +1,8 @@
-import { env } from '../../config/env.js';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
+import { env } from '../../config/env.js';
 
 export interface FfmpegSessionOptions {
   streamId: string;
@@ -19,6 +19,7 @@ export interface SessionClient {
 }
 
 export interface FfmpegSessionSnapshot {
+  sessionId: string;
   streamId: string;
   rtspUrl: string;
   state: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'errored';
@@ -44,6 +45,7 @@ const DEFAULT_RESTART_DELAY_MS = env.streamRestartDelayMs;
 const DEFAULT_MAX_RESTARTS = env.streamMaxRestarts;
 
 export class FfmpegSession {
+  private readonly sessionId: string;
   private readonly streamId: string;
   private readonly rtspUrl: string;
   private readonly ffmpegPath: string;
@@ -70,6 +72,9 @@ export class FfmpegSession {
   private stderrBuffer = '';
 
   constructor(options: FfmpegSessionOptions) {
+    this.sessionId = `${options.streamId}-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
     this.streamId = options.streamId;
     this.rtspUrl = options.rtspUrl;
     this.ffmpegPath = options.ffmpegPath || env.ffmpegPath;
@@ -83,11 +88,15 @@ export class FfmpegSession {
   }
 
   start(): void {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
+
     if (this.child || this.state === 'starting' || this.state === 'running') {
       logger.warn('ffmpeg session start skipped: already active', {
         streamId: this.streamId,
-        state: this.state,
-        pid: this.child?.pid ?? null
+        sessionId: this.sessionId,
+        pid: currentPid,
+        reason: 'already_active',
+        state: this.state
       });
       return;
     }
@@ -97,8 +106,11 @@ export class FfmpegSession {
     this.state = 'starting';
     this.stderrBuffer = '';
 
-    logger.info('starting ffmpeg session', {
+    logger.info('ffmpeg session starting', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid: null,
+      reason: 'start',
       ffmpegPath: this.ffmpegPath,
       ffmpegArgs: this.ffmpegArgs,
       restartCount: this.restartCount,
@@ -119,9 +131,11 @@ export class FfmpegSession {
 
     this.state = 'running';
 
-    logger.info('ffmpeg session process spawned', {
+    logger.info('ffmpeg session started', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
       pid: child.pid ?? null,
+      reason: 'spawned',
       restartCount: this.restartCount,
       lastRestartAt: this.lastRestartAt
     });
@@ -140,6 +154,8 @@ export class FfmpegSession {
 
       logger.info('ffmpeg session stop skipped: no active process', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: null,
         reason,
         restartCount: this.restartCount
       });
@@ -148,8 +164,9 @@ export class FfmpegSession {
 
     this.state = 'stopping';
 
-    logger.info('stopping ffmpeg session', {
+    logger.info('ffmpeg session stopping', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
       pid: child.pid ?? null,
       reason,
       shouldRestart: this.shouldRestart,
@@ -165,7 +182,9 @@ export class FfmpegSession {
 
       logger.error('failed to stop ffmpeg session cleanly', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
         pid: child.pid ?? null,
+        reason: 'kill_failed',
         error
       });
     }
@@ -179,10 +198,15 @@ export class FfmpegSession {
   }
 
   restart(reason = 'manual restart'): void {
-    logger.info('restarting ffmpeg session manually', {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
+
+    logger.warn('ffmpeg session restarting', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid: currentPid,
       reason,
-      restartCount: this.restartCount
+      restartCount: this.restartCount,
+      lastRestartAt: this.lastRestartAt
     });
 
     this.stop(reason);
@@ -193,11 +217,15 @@ export class FfmpegSession {
   }
 
   attachClient(client: SessionClient): void {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
     const existingBinding = this.clientBindings.get(client.ws);
 
     if (existingBinding) {
       logger.warn('ffmpeg session attach skipped: websocket already attached', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: currentPid,
+        reason: 'already_attached',
         clientIp: client.clientIp || existingBinding.clientIp || 'unknown',
         clientCount: this.clients.size
       });
@@ -209,8 +237,13 @@ export class FfmpegSession {
     };
 
     const errorHandler = (error: Error) => {
+      const pid = this.child ? (this.child.pid ?? null) : null;
+
       logger.error('ffmpeg session websocket client error', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid,
+        reason: 'websocket_error',
         clientIp: client.clientIp || 'unknown',
         error
       });
@@ -230,12 +263,16 @@ export class FfmpegSession {
 
     logger.info('ffmpeg session client attached', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid: currentPid,
+      reason: 'client_attach',
       clientIp: client.clientIp || 'unknown',
       clientCount: this.clients.size
     });
   }
 
   detachClient(ws: WebSocket, reason = 'manual detach'): void {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
     const binding = this.clientBindings.get(ws);
     const removed = this.clients.delete(ws);
 
@@ -251,18 +288,23 @@ export class FfmpegSession {
 
     logger.info('ffmpeg session client detached', {
       streamId: this.streamId,
-      clientIp: binding?.clientIp || 'unknown',
+      sessionId: this.sessionId,
+      pid: currentPid,
       reason,
+      clientIp: binding?.clientIp || 'unknown',
       clientCount: this.clients.size
     });
   }
 
   getSnapshot(): FfmpegSessionSnapshot {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
+
     return {
+      sessionId: this.sessionId,
       streamId: this.streamId,
       rtspUrl: this.rtspUrl,
       state: this.state,
-      pid: this.child?.pid ?? null,
+      pid: currentPid,
       clientCount: this.clients.size,
       restartCount: this.restartCount,
       lastRestartAt: this.lastRestartAt,
@@ -308,6 +350,7 @@ export class FfmpegSession {
 
   private readonly handleStdout = (chunk: Buffer): void => {
     this.lastDataAt = Date.now();
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
 
     for (const client of this.clients) {
       if (client.readyState !== client.OPEN) {
@@ -321,6 +364,9 @@ export class FfmpegSession {
 
         logger.error('failed to forward ffmpeg stdout chunk to websocket client', {
           streamId: this.streamId,
+          sessionId: this.sessionId,
+          pid: currentPid,
+          reason: 'stdout_forward_failed',
           error
         });
       }
@@ -328,6 +374,7 @@ export class FfmpegSession {
   };
 
   private readonly handleStderr = (chunk: Buffer): void => {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
     const text = chunk.toString('utf8');
     this.stderrBuffer += text;
 
@@ -343,18 +390,24 @@ export class FfmpegSession {
 
       logger.warn('ffmpeg stderr output', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: currentPid,
+        reason: 'stderr',
         message
       });
     }
   };
 
   private readonly handleError = (error: Error): void => {
+    const currentPid = this.child ? (this.child.pid ?? null) : null;
     this.lastErrorAt = Date.now();
     this.state = 'errored';
 
     logger.error('ffmpeg session process error', {
       streamId: this.streamId,
-      pid: this.child?.pid ?? null,
+      sessionId: this.sessionId,
+      pid: currentPid,
+      reason: 'process_error',
       restartCount: this.restartCount,
       lastRestartAt: this.lastRestartAt,
       error
@@ -363,6 +416,7 @@ export class FfmpegSession {
 
   private readonly handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
     const child = this.child;
+    const pid = child?.pid ?? null;
 
     if (child) {
       this.removeChildListeners(child);
@@ -378,6 +432,9 @@ export class FfmpegSession {
 
     logger.warn('ffmpeg session exited', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid,
+      reason: wasManualStop ? 'manual_stop' : 'unexpected_exit',
       code,
       signal,
       wasManualStop,
@@ -386,8 +443,11 @@ export class FfmpegSession {
     });
 
     if (wasManualStop) {
-      logger.info('ffmpeg session exit will not restart because stop was manual', {
+      logger.info('ffmpeg session restart skipped after manual stop', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid,
+        reason: 'manual_stop',
         code,
         signal
       });
@@ -399,6 +459,9 @@ export class FfmpegSession {
 
       logger.error('ffmpeg session reached max restart limit', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid,
+        reason: 'max_restart_limit_reached',
         restartCount: this.restartCount,
         maxRestarts: this.maxRestarts,
         lastExitCode: this.lastExitCode,
@@ -411,8 +474,11 @@ export class FfmpegSession {
     this.restartCount += 1;
     this.lastRestartAt = Date.now();
 
-    logger.warn('ffmpeg session scheduled for restart after unexpected exit', {
+    logger.warn('ffmpeg session restart scheduled', {
       streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid,
+      reason: 'unexpected_exit',
       restartCount: this.restartCount,
       maxRestarts: this.maxRestarts,
       restartDelayMs: this.restartDelayMs,
@@ -423,9 +489,13 @@ export class FfmpegSession {
 
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
+      const restartPid = this.child ? (this.child.pid ?? null) : null;
 
-      logger.info('restarting ffmpeg session after unexpected exit', {
+      logger.info('ffmpeg session restart executing', {
         streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: restartPid,
+        reason: 'scheduled_restart',
         restartCount: this.restartCount,
         maxRestarts: this.maxRestarts,
         restartDelayMs: this.restartDelayMs,

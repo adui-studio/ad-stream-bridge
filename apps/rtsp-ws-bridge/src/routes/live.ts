@@ -64,7 +64,11 @@ export function registerLiveRoutes(app: expressWs.Application): void {
     const rtspUrl = parseRtspUrl(req);
 
     if (!streamId) {
-      logger.warn('reject websocket live connection: invalid stream id', {
+      logger.warn('stream websocket connection rejected', {
+        streamId: null,
+        sessionId: null,
+        pid: null,
+        reason: 'invalid_stream_id',
         route: req.originalUrl,
         rawId,
         clientIp
@@ -74,9 +78,12 @@ export function registerLiveRoutes(app: expressWs.Application): void {
       return;
     }
 
-    logger.info('incoming live websocket connection', {
-      route: req.originalUrl,
+    logger.info('stream websocket connection accepted', {
       streamId,
+      sessionId: null,
+      pid: null,
+      reason: 'ws_connect',
+      route: req.originalUrl,
       clientIp,
       hasRtspUrl: Boolean(rtspUrl)
     });
@@ -89,9 +96,12 @@ export function registerLiveRoutes(app: expressWs.Application): void {
         rtspUrl
       });
     } catch (error) {
-      logger.error('failed to attach websocket client to stream manager', {
-        route: req.originalUrl,
+      logger.error('stream websocket connection initialization failed', {
         streamId,
+        sessionId: null,
+        pid: null,
+        reason: 'stream_manager_attach_failed',
+        route: req.originalUrl,
         clientIp,
         error
       });

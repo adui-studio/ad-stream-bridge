@@ -1,6 +1,6 @@
-import { env } from '../../config/env.js';
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
+import { env } from '../../config/env.js';
 import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
 
 export interface AttachClientInput {
@@ -20,17 +20,9 @@ const DEFAULT_RTSP_URL_TEMPLATE = env.rtspUrlTemplate;
 const DEFAULT_IDLE_TIMEOUT_MS = env.streamIdleTimeoutMs;
 const DEFAULT_SWEEP_INTERVAL_MS = env.streamSweepIntervalMs;
 
-function normalizeNumber(raw: string | number | undefined, fallback: number): number {
+function normalizeNumber(raw: number | undefined, fallback: number): number {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
     return raw;
-  }
-
-  if (typeof raw === 'string') {
-    const parsed = Number(raw);
-
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      return parsed;
-    }
   }
 
   return fallback;
@@ -75,8 +67,11 @@ export class StreamManager {
 
     const snapshotAfterAttach = managedSession.session.getSnapshot();
 
-    logger.info('stream manager attached websocket client', {
+    logger.info('stream websocket client connected', {
       streamId,
+      sessionId: snapshotAfterAttach.sessionId,
+      pid: snapshotAfterAttach.pid,
+      reason: 'ws_connect',
       clientIp,
       clientCount: snapshotAfterAttach.clientCount
     });
@@ -98,8 +93,13 @@ export class StreamManager {
         })
       );
     } catch (error) {
-      logger.error('failed to send live websocket initial message', {
+      const snapshot = managedSession.session.getSnapshot();
+
+      logger.error('stream websocket initial response failed', {
         streamId,
+        sessionId: snapshot.sessionId,
+        pid: snapshot.pid,
+        reason: 'ws_init_send_failed',
         clientIp,
         error
       });
@@ -115,8 +115,13 @@ export class StreamManager {
     });
 
     ws.on('error', (error) => {
-      logger.error('live websocket client error', {
+      const snapshot = managedSession.session.getSnapshot();
+
+      logger.error('stream websocket client error', {
         streamId,
+        sessionId: snapshot.sessionId,
+        pid: snapshot.pid,
+        reason: 'ws_error',
         clientIp,
         error
       });
@@ -124,9 +129,13 @@ export class StreamManager {
 
     ws.on('message', (message) => {
       const payload = Buffer.isBuffer(message) ? message.toString('utf8') : String(message);
+      const snapshot = managedSession.session.getSnapshot();
 
-      logger.info('live websocket client message received', {
+      logger.info('stream websocket client message received', {
         streamId,
+        sessionId: snapshot.sessionId,
+        pid: snapshot.pid,
+        reason: 'ws_message',
         clientIp,
         payload
       });
@@ -190,8 +199,11 @@ export class StreamManager {
 
     this.sessions.set(streamId, managedSession);
 
-    logger.info('stream manager created ffmpeg session', {
+    logger.info('stream session created', {
       streamId,
+      sessionId: session.getSnapshot().sessionId,
+      pid: null,
+      reason: 'session_create',
       rtspUrl: resolvedRtspUrl
     });
 
@@ -214,8 +226,11 @@ export class StreamManager {
     managedSession.session.stop('no websocket clients remain');
     this.sessions.delete(streamId);
 
-    logger.info('stream manager removed idle ffmpeg session', {
+    logger.info('stream session destroyed', {
       streamId,
+      sessionId: snapshot.sessionId,
+      pid: snapshot.pid,
+      reason: 'no_clients_remain',
       rtspUrl: managedSession.rtspUrl
     });
 
@@ -232,6 +247,10 @@ export class StreamManager {
     }, this.sweepIntervalMs);
 
     logger.info('stream manager started idle sweep loop', {
+      streamId: null,
+      sessionId: null,
+      pid: null,
+      reason: 'sweep_loop_start',
       sweepIntervalMs: this.sweepIntervalMs,
       idleTimeoutMs: this.idleTimeoutMs
     });
@@ -246,7 +265,10 @@ export class StreamManager {
     this.sweepTimer = null;
 
     logger.info('stream manager stopped idle sweep loop', {
-      reason: 'no active sessions'
+      streamId: null,
+      sessionId: null,
+      pid: null,
+      reason: 'sweep_loop_stop'
     });
   }
 
@@ -276,8 +298,11 @@ export class StreamManager {
         continue;
       }
 
-      logger.warn('stream manager detected idle ffmpeg session, scheduling recovery', {
+      logger.warn('stream session idle recovery triggered', {
         streamId,
+        sessionId: snapshot.sessionId,
+        pid: snapshot.pid,
+        reason: 'idle_timeout',
         idleForMs,
         idleTimeoutMs: this.idleTimeoutMs,
         lastDataAt: snapshot.lastDataAt,
