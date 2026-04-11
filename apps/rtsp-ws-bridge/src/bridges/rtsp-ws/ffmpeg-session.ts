@@ -32,6 +32,12 @@ export interface FfmpegSessionSnapshot {
   lastExitSignal: NodeJS.Signals | null;
 }
 
+interface ClientBinding {
+  clientIp?: string;
+  closeHandler: () => void;
+  errorHandler: (error: Error) => void;
+}
+
 const DEFAULT_RESTART_DELAY_MS = 3000;
 const DEFAULT_MAX_RESTARTS = 5;
 
@@ -45,6 +51,7 @@ export class FfmpegSession {
 
   private child: ChildProcessByStdio<null, Readable, Readable> | null = null;
   private readonly clients = new Set<WebSocket>();
+  private readonly clientBindings = new Map<WebSocket, ClientBinding>();
 
   private state: FfmpegSessionSnapshot['state'] = 'idle';
   private restartCount = 0;
@@ -116,6 +123,7 @@ export class FfmpegSession {
     const child = this.child;
 
     if (!child) {
+      this.clearAllClientBindings();
       this.state = 'stopped';
       this.lastStoppedAt = Date.now();
 
@@ -130,7 +138,7 @@ export class FfmpegSession {
 
     logger.info('stopping ffmpeg session', {
       streamId: this.streamId,
-      pid: child.pid,
+      pid: child.pid ?? null,
       reason
     });
 
@@ -140,14 +148,16 @@ export class FfmpegSession {
       child.kill('SIGTERM');
     } catch (error) {
       this.lastErrorAt = Date.now();
+
       logger.error('failed to stop ffmpeg session cleanly', {
         streamId: this.streamId,
-        pid: child.pid,
+        pid: child.pid ?? null,
         error
       });
     }
 
     this.child = null;
+    this.clearAllClientBindings();
     this.lastStoppedAt = Date.now();
     this.lastExitCode = null;
     this.lastExitSignal = 'SIGTERM';
@@ -166,19 +176,22 @@ export class FfmpegSession {
   }
 
   attachClient(client: SessionClient): void {
-    this.clients.add(client.ws);
+    const existingBinding = this.clientBindings.get(client.ws);
 
-    logger.info('ffmpeg session client attached', {
-      streamId: this.streamId,
-      clientIp: client.clientIp || 'unknown',
-      clientCount: this.clients.size
-    });
+    if (existingBinding) {
+      logger.warn('ffmpeg session attach skipped: websocket already attached', {
+        streamId: this.streamId,
+        clientIp: client.clientIp || existingBinding.clientIp || 'unknown',
+        clientCount: this.clients.size
+      });
+      return;
+    }
 
-    client.ws.on('close', () => {
+    const closeHandler = () => {
       this.detachClient(client.ws, 'websocket close');
-    });
+    };
 
-    client.ws.on('error', (error) => {
+    const errorHandler = (error: Error) => {
       logger.error('ffmpeg session websocket client error', {
         streamId: this.streamId,
         clientIp: client.clientIp || 'unknown',
@@ -186,11 +199,34 @@ export class FfmpegSession {
       });
 
       this.detachClient(client.ws, 'websocket error');
+    };
+
+    client.ws.on('close', closeHandler);
+    client.ws.on('error', errorHandler);
+
+    this.clients.add(client.ws);
+    this.clientBindings.set(client.ws, {
+      clientIp: client.clientIp,
+      closeHandler,
+      errorHandler
+    });
+
+    logger.info('ffmpeg session client attached', {
+      streamId: this.streamId,
+      clientIp: client.clientIp || 'unknown',
+      clientCount: this.clients.size
     });
   }
 
   detachClient(ws: WebSocket, reason = 'manual detach'): void {
+    const binding = this.clientBindings.get(ws);
     const removed = this.clients.delete(ws);
+
+    if (binding) {
+      ws.off('close', binding.closeHandler);
+      ws.off('error', binding.errorHandler);
+      this.clientBindings.delete(ws);
+    }
 
     if (!removed) {
       return;
@@ -198,6 +234,7 @@ export class FfmpegSession {
 
     logger.info('ffmpeg session client detached', {
       streamId: this.streamId,
+      clientIp: binding?.clientIp || 'unknown',
       reason,
       clientCount: this.clients.size
     });
@@ -344,6 +381,16 @@ export class FfmpegSession {
     child.stderr.off('data', this.handleStderr);
     child.off('error', this.handleError);
     child.off('exit', this.handleExit);
+  }
+
+  private clearAllClientBindings(): void {
+    for (const [ws, binding] of this.clientBindings.entries()) {
+      ws.off('close', binding.closeHandler);
+      ws.off('error', binding.errorHandler);
+    }
+
+    this.clientBindings.clear();
+    this.clients.clear();
   }
 
   private clearRestartTimer(): void {
