@@ -1,3 +1,4 @@
+import { env } from '../../config/env.js';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import type { WebSocket } from 'ws';
@@ -39,8 +40,8 @@ interface ClientBinding {
   errorHandler: (arg0: Error) => void;
 }
 
-const DEFAULT_RESTART_DELAY_MS = Number(process.env.STREAM_RESTART_DELAY_MS || 3000);
-const DEFAULT_MAX_RESTARTS = Number(process.env.STREAM_MAX_RESTARTS || 5);
+const DEFAULT_RESTART_DELAY_MS = env.streamRestartDelayMs;
+const DEFAULT_MAX_RESTARTS = env.streamMaxRestarts;
 
 export class FfmpegSession {
   private readonly streamId: string;
@@ -71,7 +72,7 @@ export class FfmpegSession {
   constructor(options: FfmpegSessionOptions) {
     this.streamId = options.streamId;
     this.rtspUrl = options.rtspUrl;
-    this.ffmpegPath = options.ffmpegPath || process.env.FFMPEG_PATH || 'ffmpeg';
+    this.ffmpegPath = options.ffmpegPath || env.ffmpegPath;
     this.restartDelayMs = this.normalizeNumber(
       options.restartDelayMs,
       DEFAULT_RESTART_DELAY_MS,

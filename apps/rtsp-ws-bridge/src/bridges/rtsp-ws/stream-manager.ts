@@ -1,3 +1,4 @@
+import { env } from '../../config/env.js';
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
 import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
@@ -15,9 +16,9 @@ interface ManagedSession {
   createdAt: number;
 }
 
-const DEFAULT_RTSP_URL_TEMPLATE = process.env.RTSP_URL_TEMPLATE || '';
-const DEFAULT_IDLE_TIMEOUT_MS = normalizeNumber(process.env.STREAM_IDLE_TIMEOUT_MS, 30_000);
-const DEFAULT_SWEEP_INTERVAL_MS = normalizeNumber(process.env.STREAM_SWEEP_INTERVAL_MS, 10_000);
+const DEFAULT_RTSP_URL_TEMPLATE = env.rtspUrlTemplate;
+const DEFAULT_IDLE_TIMEOUT_MS = env.streamIdleTimeoutMs;
+const DEFAULT_SWEEP_INTERVAL_MS = env.streamSweepIntervalMs;
 
 function normalizeNumber(raw: string | number | undefined, fallback: number): number {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
