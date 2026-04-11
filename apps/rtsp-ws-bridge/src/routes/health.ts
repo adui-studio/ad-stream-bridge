@@ -4,6 +4,7 @@ import { streamManager } from '../bridges/rtsp-ws/stream-manager.js';
 export function registerHealthRoutes(app: Application): void {
   app.get('/healthz', (_req: Request, res: Response) => {
     const snapshots = streamManager.getAllSessionSnapshots();
+    const runtime = streamManager.getRuntimeStats();
 
     res.status(200).json({
       ok: true,
@@ -11,7 +12,10 @@ export function registerHealthRoutes(app: Application): void {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptimeSec: Math.floor(process.uptime()),
-      activeSessionCount: streamManager.getActiveSessionCount(),
+      activeSessionCount: runtime.activeSessionCount,
+      idleTimeoutMs: runtime.idleTimeoutMs,
+      sweepIntervalMs: runtime.sweepIntervalMs,
+      lastSweepAt: runtime.lastSweepAt,
       sessions: snapshots
     });
   });

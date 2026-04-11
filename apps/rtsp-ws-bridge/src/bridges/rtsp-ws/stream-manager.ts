@@ -16,6 +16,24 @@ interface ManagedSession {
 }
 
 const DEFAULT_RTSP_URL_TEMPLATE = process.env.RTSP_URL_TEMPLATE || '';
+const DEFAULT_IDLE_TIMEOUT_MS = normalizeNumber(process.env.STREAM_IDLE_TIMEOUT_MS, 30_000);
+const DEFAULT_SWEEP_INTERVAL_MS = normalizeNumber(process.env.STREAM_SWEEP_INTERVAL_MS, 10_000);
+
+function normalizeNumber(raw: string | number | undefined, fallback: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return raw;
+  }
+
+  if (typeof raw === 'string') {
+    const parsed = Number(raw);
+
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
 
 function resolveRtspUrl(streamId: string, rtspUrl?: string): string {
   const normalized = rtspUrl?.trim();
@@ -33,6 +51,15 @@ function resolveRtspUrl(streamId: string, rtspUrl?: string): string {
 
 export class StreamManager {
   private readonly sessions = new Map<string, ManagedSession>();
+  private readonly idleTimeoutMs: number;
+  private readonly sweepIntervalMs: number;
+  private sweepTimer: NodeJS.Timeout | null = null;
+  private lastSweepAt: number | null = null;
+
+  constructor(options?: { idleTimeoutMs?: number; sweepIntervalMs?: number }) {
+    this.idleTimeoutMs = normalizeNumber(options?.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS);
+    this.sweepIntervalMs = normalizeNumber(options?.sweepIntervalMs, DEFAULT_SWEEP_INTERVAL_MS);
+  }
 
   attachClient(input: AttachClientInput): void {
     const { streamId, ws, clientIp, rtspUrl } = input;
@@ -56,6 +83,8 @@ export class StreamManager {
     if (snapshotBeforeAttach.clientCount === 0) {
       managedSession.session.start();
     }
+
+    this.ensureSweepStarted();
 
     try {
       ws.send(
@@ -124,6 +153,20 @@ export class StreamManager {
     return Array.from(this.sessions.values()).map(({ session }) => session.getSnapshot());
   }
 
+  getRuntimeStats(): {
+    activeSessionCount: number;
+    idleTimeoutMs: number;
+    sweepIntervalMs: number;
+    lastSweepAt: number | null;
+  } {
+    return {
+      activeSessionCount: this.sessions.size,
+      idleTimeoutMs: this.idleTimeoutMs,
+      sweepIntervalMs: this.sweepIntervalMs,
+      lastSweepAt: this.lastSweepAt
+    };
+  }
+
   private getOrCreateSession(streamId: string, rtspUrl?: string): ManagedSession {
     const existing = this.sessions.get(streamId);
 
@@ -174,6 +217,75 @@ export class StreamManager {
       streamId,
       rtspUrl: managedSession.rtspUrl
     });
+
+    this.maybeStopSweep();
+  }
+
+  private ensureSweepStarted(): void {
+    if (this.sweepTimer || this.sweepIntervalMs <= 0) {
+      return;
+    }
+
+    this.sweepTimer = setInterval(() => {
+      this.runSweep();
+    }, this.sweepIntervalMs);
+
+    logger.info('stream manager started idle sweep loop', {
+      sweepIntervalMs: this.sweepIntervalMs,
+      idleTimeoutMs: this.idleTimeoutMs
+    });
+  }
+
+  private maybeStopSweep(): void {
+    if (this.sessions.size > 0 || !this.sweepTimer) {
+      return;
+    }
+
+    clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
+
+    logger.info('stream manager stopped idle sweep loop', {
+      reason: 'no active sessions'
+    });
+  }
+
+  private runSweep(): void {
+    this.lastSweepAt = Date.now();
+
+    for (const [streamId, managedSession] of this.sessions.entries()) {
+      const snapshot = managedSession.session.getSnapshot();
+
+      if (snapshot.clientCount === 0) {
+        continue;
+      }
+
+      if (snapshot.state !== 'running') {
+        continue;
+      }
+
+      const referenceTime = snapshot.lastDataAt ?? snapshot.lastStartedAt;
+
+      if (!referenceTime) {
+        continue;
+      }
+
+      const idleForMs = Date.now() - referenceTime;
+
+      if (idleForMs < this.idleTimeoutMs) {
+        continue;
+      }
+
+      logger.warn('stream manager detected idle ffmpeg session, scheduling recovery', {
+        streamId,
+        idleForMs,
+        idleTimeoutMs: this.idleTimeoutMs,
+        lastDataAt: snapshot.lastDataAt,
+        lastStartedAt: snapshot.lastStartedAt,
+        restartCount: snapshot.restartCount
+      });
+
+      managedSession.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
+    }
   }
 }
 
