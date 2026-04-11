@@ -1,9 +1,12 @@
-name: Deploy Docs to GitHub Pages
+name: 部署 VitePress 文档到 GitHub Pages
 
 on:
   push:
     branches:
       - main
+    paths:
+      - docs/**
+      - .github/workflows/deploy-docs.yml
   workflow_dispatch:
 
 permissions:
@@ -12,45 +15,41 @@ permissions:
   id-token: write
 
 concurrency:
-  group: docs-pages
+  group: github-pages
   cancel-in-progress: false
 
 jobs:
   build:
+    name: 构建文档
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: 拉取代码
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 25
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: 安装依赖
+        run: pnpm --dir docs install --frozen-lockfile
 
-      - name: Build docs
-        run: pnpm docs:build
+      - name: 构建文档
+        run: pnpm --dir docs build
 
-      - name: Upload Pages artifact
+      - name: 上传 Pages 构建产物
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/.vitepress/dist
 
   deploy:
+    name: 部署到 GitHub Pages
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -58,6 +57,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: 部署
         id: deployment
         uses: actions/deploy-pages@v4
