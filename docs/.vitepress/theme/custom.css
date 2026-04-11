@@ -1,0 +1,314 @@
+:root {
+  --vp-c-brand-1: #65308b;
+  --vp-c-brand-2: #7d42ab;
+  --vp-c-brand-3: #66d50f;
+  --vp-c-brand-soft: rgba(101, 48, 139, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    #65308b 0%,
+    #7d42ab 42%,
+    #66d50f 100%
+  );
+
+  --asb-home-glow-1: rgba(101, 48, 139, 0.22);
+  --asb-home-glow-2: rgba(102, 213, 15, 0.16);
+  --asb-card-border: rgba(23, 23, 23, 0.08);
+  --asb-card-bg: rgba(255, 255, 255, 0.82);
+  --asb-card-shadow: 0 24px 48px rgba(17, 24, 39, 0.08);
+  --asb-banner-bg: linear-gradient(
+    135deg,
+    rgba(101, 48, 139, 0.1),
+    rgba(102, 213, 15, 0.08)
+  );
+
+  --asb-doc-border: rgba(23, 23, 23, 0.08);
+  --asb-doc-bg: rgba(255, 255, 255, 0.72);
+  --asb-doc-shadow: 0 18px 40px rgba(17, 24, 39, 0.06);
+  --asb-code-border: rgba(101, 48, 139, 0.1);
+}
+
+.dark {
+  --vp-c-brand-1: #b98ae4;
+  --vp-c-brand-2: #9358c2;
+  --vp-c-brand-3: #78e21f;
+  --vp-c-brand-soft: rgba(185, 138, 228, 0.18);
+
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    #c89cf0 0%,
+    #9358c2 40%,
+    #78e21f 100%
+  );
+
+  --asb-home-glow-1: rgba(147, 88, 194, 0.24);
+  --asb-home-glow-2: rgba(120, 226, 31, 0.16);
+  --asb-card-border: rgba(255, 255, 255, 0.08);
+  --asb-card-bg: rgba(18, 20, 24, 0.74);
+  --asb-card-shadow: 0 28px 64px rgba(0, 0, 0, 0.32);
+  --asb-banner-bg: linear-gradient(
+    135deg,
+    rgba(147, 88, 194, 0.18),
+    rgba(120, 226, 31, 0.1)
+  );
+
+  --asb-doc-border: rgba(255, 255, 255, 0.08);
+  --asb-doc-bg: rgba(18, 20, 24, 0.58);
+  --asb-doc-shadow: 0 20px 48px rgba(0, 0, 0, 0.24);
+  --asb-code-border: rgba(147, 88, 194, 0.16);
+}
+
+.VPNavBarTitle .logo {
+  border-radius: 12px;
+}
+
+.VPHome {
+  position: relative;
+}
+
+.VPHome::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 100%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 8%, var(--asb-home-glow-1), transparent 42%),
+    radial-gradient(circle at 82% 0%, var(--asb-home-glow-2), transparent 34%),
+    radial-gradient(
+      circle at 55% 34%,
+      rgba(125, 66, 171, 0.12),
+      transparent 36%
+    );
+  z-index: 0;
+}
+
+.VPHomeHero,
+.VPHomeFeatures,
+.adui-home-section {
+  position: relative;
+  z-index: 1;
+}
+
+.VPHomeHero .image {
+  padding: 18px;
+}
+
+.VPHomeHero .image img {
+  width: min(220px, 72vw);
+  height: auto;
+  filter: drop-shadow(0 24px 56px rgba(101, 48, 139, 0.24));
+}
+
+.VPHomeHero .main .tagline {
+  max-width: 760px;
+  font-size: 1.06rem;
+  line-height: 1.8;
+}
+
+.VPHomeFeatures {
+  margin-top: 28px;
+}
+
+.VPFeature {
+  border: 1px solid var(--asb-card-border);
+  background: var(--asb-card-bg);
+  border-radius: 24px;
+  box-shadow: var(--asb-card-shadow);
+  backdrop-filter: blur(12px);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.VPFeature:hover {
+  transform: translateY(-4px);
+  border-color: rgba(101, 48, 139, 0.22);
+  box-shadow: 0 28px 60px rgba(101, 48, 139, 0.14);
+}
+
+.adui-home-section {
+  margin: 32px auto 0;
+  max-width: 1152px;
+  padding: 0 24px 48px;
+}
+
+.adui-home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.adui-home-card {
+  border: 1px solid var(--asb-card-border);
+  background: var(--asb-card-bg);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: var(--asb-card-shadow);
+  backdrop-filter: blur(12px);
+}
+
+.adui-home-card__eyebrow,
+.adui-home-banner__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+}
+
+.adui-home-card h2,
+.adui-home-banner h2 {
+  margin: 0 0 12px;
+  line-height: 1.2;
+}
+
+.adui-home-card p,
+.adui-home-banner p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  line-height: 1.8;
+}
+
+.adui-home-card p {
+  margin-bottom: 18px;
+}
+
+.adui-home-card pre {
+  margin: 0;
+  border-radius: 18px;
+}
+
+.adui-home-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.8fr);
+  gap: 24px;
+  align-items: center;
+  border: 1px solid var(--asb-card-border);
+  background: var(--asb-banner-bg);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: var(--asb-card-shadow);
+}
+
+.adui-home-banner__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.adui-home-link {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--vp-c-brand-1);
+}
+
+.adui-home-link:hover {
+  text-decoration: underline;
+}
+
+/* doc pages */
+.VPDoc.has-aside .content-container,
+.VPDoc:not(.has-aside) .content-container {
+  max-width: 960px;
+}
+
+.vp-doc {
+  line-height: 1.85;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  letter-spacing: -0.02em;
+}
+
+.vp-doc h1 {
+  margin-bottom: 20px;
+}
+
+.vp-doc h2 {
+  margin-top: 44px;
+  padding-top: 8px;
+  border-top: 1px solid var(--asb-doc-border);
+}
+
+.vp-doc h2:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.vp-doc blockquote {
+  border-left: 4px solid var(--vp-c-brand-1);
+  background: var(--asb-doc-bg);
+  border-radius: 0 16px 16px 0;
+  padding: 14px 18px;
+}
+
+.vp-doc table {
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid var(--asb-doc-border);
+  box-shadow: var(--asb-doc-shadow);
+}
+
+.vp-doc table tr {
+  background: transparent;
+}
+
+.vp-doc table th {
+  background: color-mix(in srgb, var(--vp-c-brand-1) 8%, transparent);
+}
+
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--asb-code-border);
+  border-radius: 18px;
+  box-shadow: var(--asb-doc-shadow);
+}
+
+.vp-doc .custom-block {
+  border-radius: 18px;
+  border: 1px solid var(--asb-doc-border);
+  box-shadow: var(--asb-doc-shadow);
+}
+
+.VPSidebarItem.is-active > .item .link > .text,
+.VPSidebarItem .link:hover .text,
+.VPLink.link.active {
+  color: var(--vp-c-brand-1);
+}
+
+.VPDocAsideOutline .outline-link.active,
+.VPDocAsideOutline .outline-link:hover {
+  color: var(--vp-c-brand-1);
+}
+
+@media (max-width: 960px) {
+  .adui-home-grid,
+  .adui-home-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .adui-home-section {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .adui-home-card,
+  .adui-home-banner {
+    border-radius: 22px;
+    padding: 20px;
+  }
+}

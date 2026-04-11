@@ -15,7 +15,8 @@ export default [
       '**/build/**',
       '**/coverage/**',
       '**/.turbo/**',
-      '**/*.d.ts'
+      '**/*.d.ts',
+      '**/.vitepress/**'
     ]
   },
 

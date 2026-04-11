@@ -43,7 +43,10 @@
     "format:check": "prettier --check \"**/*.{js,mjs,cjs,ts,tsx,json,md,yml,yaml}\"",
     "dev:rtsp-ws-bridge": "pnpm --filter @ad-stream-bridge/rtsp-ws-bridge dev",
     "prepare": "husky",
-    "commit": "git-cz"
+    "commit": "git-cz",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "config": {
     "commitizen": {
@@ -76,6 +79,7 @@
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.2",
     "turbo": "^2.8.21",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitepress": "2.0.0-alpha.17"
   }
 }
