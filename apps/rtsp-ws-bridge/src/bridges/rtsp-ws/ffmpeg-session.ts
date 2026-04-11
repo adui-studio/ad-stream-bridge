@@ -24,6 +24,7 @@ export interface FfmpegSessionSnapshot {
   pid: number | null;
   clientCount: number;
   restartCount: number;
+  lastRestartAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;
   lastDataAt: number | null;
@@ -35,11 +36,11 @@ export interface FfmpegSessionSnapshot {
 interface ClientBinding {
   clientIp?: string;
   closeHandler: () => void;
-  errorHandler: (error: Error) => void;
+  errorHandler: (arg0: Error) => void;
 }
 
-const DEFAULT_RESTART_DELAY_MS = 3000;
-const DEFAULT_MAX_RESTARTS = 5;
+const DEFAULT_RESTART_DELAY_MS = Number(process.env.STREAM_RESTART_DELAY_MS || 3000);
+const DEFAULT_MAX_RESTARTS = Number(process.env.STREAM_MAX_RESTARTS || 5);
 
 export class FfmpegSession {
   private readonly streamId: string;
@@ -55,6 +56,7 @@ export class FfmpegSession {
 
   private state: FfmpegSessionSnapshot['state'] = 'idle';
   private restartCount = 0;
+  private lastRestartAt: number | null = null;
   private lastStartedAt: number | null = null;
   private lastStoppedAt: number | null = null;
   private lastDataAt: number | null = null;
@@ -70,8 +72,12 @@ export class FfmpegSession {
     this.streamId = options.streamId;
     this.rtspUrl = options.rtspUrl;
     this.ffmpegPath = options.ffmpegPath || process.env.FFMPEG_PATH || 'ffmpeg';
-    this.restartDelayMs = options.restartDelayMs ?? DEFAULT_RESTART_DELAY_MS;
-    this.maxRestarts = options.maxRestarts ?? DEFAULT_MAX_RESTARTS;
+    this.restartDelayMs = this.normalizeNumber(
+      options.restartDelayMs,
+      DEFAULT_RESTART_DELAY_MS,
+      3000
+    );
+    this.maxRestarts = this.normalizeNumber(options.maxRestarts, DEFAULT_MAX_RESTARTS, 5);
     this.ffmpegArgs = options.ffmpegArgs ?? this.buildDefaultArgs();
   }
 
@@ -93,7 +99,9 @@ export class FfmpegSession {
     logger.info('starting ffmpeg session', {
       streamId: this.streamId,
       ffmpegPath: this.ffmpegPath,
-      ffmpegArgs: this.ffmpegArgs
+      ffmpegArgs: this.ffmpegArgs,
+      restartCount: this.restartCount,
+      lastRestartAt: this.lastRestartAt
     });
 
     const child = spawn(this.ffmpegPath, this.ffmpegArgs, {
@@ -112,7 +120,9 @@ export class FfmpegSession {
 
     logger.info('ffmpeg session process spawned', {
       streamId: this.streamId,
-      pid: child.pid ?? null
+      pid: child.pid ?? null,
+      restartCount: this.restartCount,
+      lastRestartAt: this.lastRestartAt
     });
   }
 
@@ -129,7 +139,8 @@ export class FfmpegSession {
 
       logger.info('ffmpeg session stop skipped: no active process', {
         streamId: this.streamId,
-        reason
+        reason,
+        restartCount: this.restartCount
       });
       return;
     }
@@ -139,7 +150,9 @@ export class FfmpegSession {
     logger.info('stopping ffmpeg session', {
       streamId: this.streamId,
       pid: child.pid ?? null,
-      reason
+      reason,
+      shouldRestart: this.shouldRestart,
+      restartCount: this.restartCount
     });
 
     this.removeChildListeners(child);
@@ -165,13 +178,16 @@ export class FfmpegSession {
   }
 
   restart(reason = 'manual restart'): void {
-    logger.info('restarting ffmpeg session', {
+    logger.info('restarting ffmpeg session manually', {
       streamId: this.streamId,
-      reason
+      reason,
+      restartCount: this.restartCount
     });
 
     this.stop(reason);
     this.shouldRestart = true;
+    this.lastRestartAt = Date.now();
+    this.restartCount += 1;
     this.start();
   }
 
@@ -248,6 +264,7 @@ export class FfmpegSession {
       pid: this.child?.pid ?? null,
       clientCount: this.clients.size,
       restartCount: this.restartCount,
+      lastRestartAt: this.lastRestartAt,
       lastStartedAt: this.lastStartedAt,
       lastStoppedAt: this.lastStoppedAt,
       lastDataAt: this.lastDataAt,
@@ -270,6 +287,22 @@ export class FfmpegSession {
       'copy',
       'pipe:1'
     ];
+  }
+
+  private normalizeNumber(
+    value: number | undefined,
+    fallback: number,
+    finalFallback: number
+  ): number {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+
+    if (Number.isFinite(fallback) && fallback >= 0) {
+      return fallback;
+    }
+
+    return finalFallback;
   }
 
   private readonly handleStdout = (chunk: Buffer): void => {
@@ -321,6 +354,8 @@ export class FfmpegSession {
     logger.error('ffmpeg session process error', {
       streamId: this.streamId,
       pid: this.child?.pid ?? null,
+      restartCount: this.restartCount,
+      lastRestartAt: this.lastRestartAt,
       error
     });
   };
@@ -338,14 +373,23 @@ export class FfmpegSession {
     this.lastExitSignal = signal;
     this.state = 'stopped';
 
+    const wasManualStop = !this.shouldRestart;
+
     logger.warn('ffmpeg session exited', {
       streamId: this.streamId,
       code,
       signal,
-      shouldRestart: this.shouldRestart
+      wasManualStop,
+      restartCount: this.restartCount,
+      maxRestarts: this.maxRestarts
     });
 
-    if (!this.shouldRestart) {
+    if (wasManualStop) {
+      logger.info('ffmpeg session exit will not restart because stop was manual', {
+        streamId: this.streamId,
+        code,
+        signal
+      });
       return;
     }
 
@@ -355,21 +399,36 @@ export class FfmpegSession {
       logger.error('ffmpeg session reached max restart limit', {
         streamId: this.streamId,
         restartCount: this.restartCount,
-        maxRestarts: this.maxRestarts
+        maxRestarts: this.maxRestarts,
+        lastExitCode: this.lastExitCode,
+        lastExitSignal: this.lastExitSignal
       });
 
       return;
     }
 
     this.restartCount += 1;
+    this.lastRestartAt = Date.now();
+
+    logger.warn('ffmpeg session scheduled for restart after unexpected exit', {
+      streamId: this.streamId,
+      restartCount: this.restartCount,
+      maxRestarts: this.maxRestarts,
+      restartDelayMs: this.restartDelayMs,
+      lastRestartAt: this.lastRestartAt,
+      lastExitCode: this.lastExitCode,
+      lastExitSignal: this.lastExitSignal
+    });
 
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
 
-      logger.info('restarting ffmpeg session after exit', {
+      logger.info('restarting ffmpeg session after unexpected exit', {
         streamId: this.streamId,
         restartCount: this.restartCount,
-        restartDelayMs: this.restartDelayMs
+        maxRestarts: this.maxRestarts,
+        restartDelayMs: this.restartDelayMs,
+        lastRestartAt: this.lastRestartAt
       });
 
       this.start();
