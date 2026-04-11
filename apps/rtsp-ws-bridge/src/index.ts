@@ -2,6 +2,7 @@ import expressWs from 'express-ws';
 import { logger } from '@adui/logger';
 import { createApp } from './app.js';
 import { errorHandler, notFoundHandler } from './middleware/not-found.js';
+import { registerLiveRoutes } from './routes/live.js';
 import { registerWsPingRoutes } from './routes/ws-ping.js';
 
 const DEFAULT_HOST = '0.0.0.0';
@@ -41,6 +42,7 @@ async function bootstrap(): Promise<void> {
   const app = wsInstance.app;
 
   registerWsPingRoutes(app);
+  registerLiveRoutes(app);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
