@@ -4,7 +4,7 @@ import { streamManager } from '../bridges/rtsp-ws/stream-manager.js';
 
 export function registerHealthRoutes(app: Application): void {
   app.get('/healthz', (_req: Request, res: Response) => {
-    const snapshots = streamManager.getAllSessionSnapshots();
+    const sessions = streamManager.getAllSessionSnapshots();
     const runtime = streamManager.getRuntimeStats();
 
     res.status(200).json({
@@ -13,8 +13,14 @@ export function registerHealthRoutes(app: Application): void {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptimeSec: Math.floor(process.uptime()),
-      env: {
-        nodeEnv: env.nodeEnv,
+      runtime: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        pid: process.pid,
+        nodeEnv: env.nodeEnv
+      },
+      config: {
         host: env.host,
         port: env.port,
         logLevel: env.logLevel,
@@ -25,11 +31,13 @@ export function registerHealthRoutes(app: Application): void {
         streamIdleTimeoutMs: env.streamIdleTimeoutMs,
         streamSweepIntervalMs: env.streamSweepIntervalMs
       },
-      activeSessionCount: runtime.activeSessionCount,
-      idleTimeoutMs: runtime.idleTimeoutMs,
-      sweepIntervalMs: runtime.sweepIntervalMs,
-      lastSweepAt: runtime.lastSweepAt,
-      sessions: snapshots
+      bridge: {
+        activeSessionCount: runtime.activeSessionCount,
+        idleTimeoutMs: runtime.idleTimeoutMs,
+        sweepIntervalMs: runtime.sweepIntervalMs,
+        lastSweepAt: runtime.lastSweepAt
+      },
+      sessions
     });
   });
 }
