@@ -41,6 +41,8 @@ interface ClientBinding {
   errorHandler: (arg0: Error) => void;
 }
 
+type StopMode = 'shutdown' | 'restart';
+
 const DEFAULT_RESTART_DELAY_MS = env.streamRestartDelayMs;
 const DEFAULT_MAX_RESTARTS = env.streamMaxRestarts;
 
@@ -114,7 +116,8 @@ export class FfmpegSession {
       ffmpegPath: this.ffmpegPath,
       ffmpegArgs: this.ffmpegArgs,
       restartCount: this.restartCount,
-      lastRestartAt: this.lastRestartAt
+      lastRestartAt: this.lastRestartAt,
+      clientCount: this.clients.size
     });
 
     const child = spawn(this.ffmpegPath, this.ffmpegArgs, {
@@ -137,64 +140,18 @@ export class FfmpegSession {
       pid: child.pid ?? null,
       reason: 'spawned',
       restartCount: this.restartCount,
-      lastRestartAt: this.lastRestartAt
+      lastRestartAt: this.lastRestartAt,
+      clientCount: this.clients.size
     });
   }
 
   stop(reason = 'manual stop'): void {
-    this.shouldRestart = false;
-    this.clearRestartTimer();
-
-    const child = this.child;
-
-    if (!child) {
-      this.clearAllClientBindings();
-      this.state = 'stopped';
-      this.lastStoppedAt = Date.now();
-
-      logger.info('ffmpeg session stop skipped: no active process', {
-        streamId: this.streamId,
-        sessionId: this.sessionId,
-        pid: null,
-        reason,
-        restartCount: this.restartCount
-      });
-      return;
-    }
-
-    this.state = 'stopping';
-
-    logger.info('ffmpeg session stopping', {
-      streamId: this.streamId,
-      sessionId: this.sessionId,
-      pid: child.pid ?? null,
+    this.stopInternal({
       reason,
-      shouldRestart: this.shouldRestart,
-      restartCount: this.restartCount
+      mode: 'shutdown',
+      clearClients: true,
+      disableRestart: true
     });
-
-    this.removeChildListeners(child);
-
-    try {
-      child.kill('SIGTERM');
-    } catch (error) {
-      this.lastErrorAt = Date.now();
-
-      logger.error('failed to stop ffmpeg session cleanly', {
-        streamId: this.streamId,
-        sessionId: this.sessionId,
-        pid: child.pid ?? null,
-        reason: 'kill_failed',
-        error
-      });
-    }
-
-    this.child = null;
-    this.clearAllClientBindings();
-    this.lastStoppedAt = Date.now();
-    this.lastExitCode = null;
-    this.lastExitSignal = 'SIGTERM';
-    this.state = 'stopped';
   }
 
   restart(reason = 'manual restart'): void {
@@ -206,13 +163,19 @@ export class FfmpegSession {
       pid: currentPid,
       reason,
       restartCount: this.restartCount,
-      lastRestartAt: this.lastRestartAt
+      lastRestartAt: this.lastRestartAt,
+      clientCount: this.clients.size
     });
 
-    this.stop(reason);
-    this.shouldRestart = true;
-    this.lastRestartAt = Date.now();
+    this.stopInternal({
+      reason,
+      mode: 'restart',
+      clearClients: false,
+      disableRestart: false
+    });
+
     this.restartCount += 1;
+    this.lastRestartAt = Date.now();
     this.start();
   }
 
@@ -317,6 +280,88 @@ export class FfmpegSession {
     };
   }
 
+  private stopInternal(options: {
+    reason: string;
+    mode: StopMode;
+    clearClients: boolean;
+    disableRestart: boolean;
+  }): void {
+    const { reason, mode, clearClients, disableRestart } = options;
+
+    if (disableRestart) {
+      this.shouldRestart = false;
+    }
+
+    this.clearRestartTimer();
+
+    const child = this.child;
+
+    if (!child) {
+      if (clearClients) {
+        this.clearAllClientBindings();
+      }
+
+      this.state = 'stopped';
+      this.lastStoppedAt = Date.now();
+
+      logger.info('ffmpeg session stop skipped: no active process', {
+        streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: null,
+        reason,
+        mode,
+        clearClients,
+        shouldRestart: this.shouldRestart,
+        restartCount: this.restartCount,
+        clientCount: this.clients.size
+      });
+
+      return;
+    }
+
+    this.state = 'stopping';
+
+    logger.info('ffmpeg session stopping', {
+      streamId: this.streamId,
+      sessionId: this.sessionId,
+      pid: child.pid ?? null,
+      reason,
+      mode,
+      clearClients,
+      shouldRestart: this.shouldRestart,
+      restartCount: this.restartCount,
+      clientCount: this.clients.size
+    });
+
+    this.removeChildListeners(child);
+
+    try {
+      child.kill('SIGTERM');
+    } catch (error) {
+      this.lastErrorAt = Date.now();
+
+      logger.error('failed to stop ffmpeg session cleanly', {
+        streamId: this.streamId,
+        sessionId: this.sessionId,
+        pid: child.pid ?? null,
+        reason: 'kill_failed',
+        stopReason: reason,
+        mode,
+        error
+      });
+    }
+
+    this.child = null;
+    this.lastStoppedAt = Date.now();
+    this.lastExitCode = null;
+    this.lastExitSignal = 'SIGTERM';
+    this.state = 'stopped';
+
+    if (clearClients) {
+      this.clearAllClientBindings();
+    }
+  }
+
   private buildDefaultArgs(): string[] {
     return [
       '-rtsp_transport',
@@ -369,6 +414,8 @@ export class FfmpegSession {
           reason: 'stdout_forward_failed',
           error
         });
+
+        this.detachClient(client, 'stdout forward failed');
       }
     }
   };
@@ -410,6 +457,7 @@ export class FfmpegSession {
       reason: 'process_error',
       restartCount: this.restartCount,
       lastRestartAt: this.lastRestartAt,
+      clientCount: this.clients.size,
       error
     });
   };
@@ -439,7 +487,8 @@ export class FfmpegSession {
       signal,
       wasManualStop,
       restartCount: this.restartCount,
-      maxRestarts: this.maxRestarts
+      maxRestarts: this.maxRestarts,
+      clientCount: this.clients.size
     });
 
     if (wasManualStop) {
@@ -449,7 +498,8 @@ export class FfmpegSession {
         pid,
         reason: 'manual_stop',
         code,
-        signal
+        signal,
+        clientCount: this.clients.size
       });
       return;
     }
@@ -465,7 +515,8 @@ export class FfmpegSession {
         restartCount: this.restartCount,
         maxRestarts: this.maxRestarts,
         lastExitCode: this.lastExitCode,
-        lastExitSignal: this.lastExitSignal
+        lastExitSignal: this.lastExitSignal,
+        clientCount: this.clients.size
       });
 
       return;
@@ -484,7 +535,8 @@ export class FfmpegSession {
       restartDelayMs: this.restartDelayMs,
       lastRestartAt: this.lastRestartAt,
       lastExitCode: this.lastExitCode,
-      lastExitSignal: this.lastExitSignal
+      lastExitSignal: this.lastExitSignal,
+      clientCount: this.clients.size
     });
 
     this.restartTimer = setTimeout(() => {
@@ -499,7 +551,8 @@ export class FfmpegSession {
         restartCount: this.restartCount,
         maxRestarts: this.maxRestarts,
         restartDelayMs: this.restartDelayMs,
-        lastRestartAt: this.lastRestartAt
+        lastRestartAt: this.lastRestartAt,
+        clientCount: this.clients.size
       });
 
       this.start();

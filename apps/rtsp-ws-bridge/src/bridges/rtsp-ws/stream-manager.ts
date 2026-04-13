@@ -307,7 +307,8 @@ export class StreamManager {
         idleTimeoutMs: this.idleTimeoutMs,
         lastDataAt: snapshot.lastDataAt,
         lastStartedAt: snapshot.lastStartedAt,
-        restartCount: snapshot.restartCount
+        restartCount: snapshot.restartCount,
+        clientCount: snapshot.clientCount
       });
 
       managedSession.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
