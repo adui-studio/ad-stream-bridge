@@ -105,13 +105,17 @@ export class StreamManager {
       });
 
       managedSession.session.detachClient(ws, 'initial message send failed');
-      this.cleanupSessionIfIdle(streamId);
+      this.cleanupSessionIfIdle(streamId, 'initial_send_failed');
       throw error;
     }
 
+    const cleanupForSocket = (reason: string) => {
+      managedSession.session.detachClient(ws, reason);
+      this.cleanupSessionIfIdle(streamId, reason);
+    };
+
     ws.on('close', (code, reason) => {
-      managedSession.session.detachClient(ws, `websocket close (${code}: ${reason.toString()})`);
-      this.cleanupSessionIfIdle(streamId);
+      cleanupForSocket(`websocket close (${code}: ${reason.toString()})`);
     });
 
     ws.on('error', (error) => {
@@ -125,6 +129,8 @@ export class StreamManager {
         clientIp,
         error
       });
+
+      cleanupForSocket('websocket error');
     });
 
     ws.on('message', (message) => {
@@ -210,7 +216,7 @@ export class StreamManager {
     return managedSession;
   }
 
-  private cleanupSessionIfIdle(streamId: string): void {
+  private cleanupSessionIfIdle(streamId: string, triggerReason = 'idle_cleanup'): void {
     const managedSession = this.sessions.get(streamId);
 
     if (!managedSession) {
@@ -220,9 +226,19 @@ export class StreamManager {
     const snapshot = managedSession.session.getSnapshot();
 
     if (snapshot.clientCount > 0) {
+      logger.debug?.('stream session cleanup skipped: clients still attached', {
+        streamId,
+        sessionId: snapshot.sessionId,
+        pid: snapshot.pid,
+        reason: triggerReason,
+        clientCount: snapshot.clientCount,
+        state: snapshot.state
+      });
       return;
     }
 
+    // 只有 session 仍然存在于 registry 中时，才允许 stop + delete
+    // 这样可以避免重复 close/error 清理时出现重复 destroy 语义。
     managedSession.session.stop('no websocket clients remain');
     this.sessions.delete(streamId);
 
@@ -230,8 +246,9 @@ export class StreamManager {
       streamId,
       sessionId: snapshot.sessionId,
       pid: snapshot.pid,
-      reason: 'no_clients_remain',
-      rtspUrl: managedSession.rtspUrl
+      reason: triggerReason,
+      rtspUrl: managedSession.rtspUrl,
+      createdAt: managedSession.createdAt
     });
 
     this.maybeStopSweep();
@@ -278,10 +295,13 @@ export class StreamManager {
     for (const [streamId, managedSession] of this.sessions.entries()) {
       const snapshot = managedSession.session.getSnapshot();
 
+      // 有 client 才值得做 recovery；没有 client 的 session 应由 cleanup 路径销毁
       if (snapshot.clientCount === 0) {
+        this.cleanupSessionIfIdle(streamId, 'sweep_no_clients');
         continue;
       }
 
+      // 非 running 状态不做 idle recovery
       if (snapshot.state !== 'running') {
         continue;
       }
