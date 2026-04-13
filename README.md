@@ -325,14 +325,84 @@ STREAM_SWEEP_INTERVAL_MS=10000
 
 ## 恢复策略
 
-当前恢复行为比较明确：
+当前恢复行为采用**明确、保守、可追踪**的设计，不追求一开始就把运行时做得过于复杂。
+
+在当前阶段，项目会把 **FFmpeg 进程重启** 与 **Session 销毁** 视为两类不同的生命周期操作，不将二者混为一体。
+
+### Session 生命周期语义
+
+#### 1. 手动停止（manual stop）
+
+手动停止表示显式终止当前 session。
+
+行为约定：
+
+- 停止当前 FFmpeg 进程
+- 禁止后续自动重启
+- 清理并解绑当前 session 下的所有 websocket client
+- 允许该 session 进入 teardown / destroy 流程
+
+典型场景：
+
+- 最后一个 websocket client 断开后，服务端决定释放资源
+- 服务端显式终止当前流 session
+
+#### 2. 恢复性重启（recovery restart）
+
+恢复性重启表示 session 仍然有效，但为了恢复媒体输出，需要重启 FFmpeg 进程。
+
+行为约定：
+
+- 停止旧的 FFmpeg 进程
+- 保留当前已挂接的 websocket client
+- 在旧进程退出后重新拉起新的 FFmpeg 进程
+- 不销毁当前 session
+- 尽量对已连接客户端保持透明
+
+典型场景：
+
+- stdout 长时间没有数据，触发 idle recovery
+- 需要恢复推流，但不能丢失 client 与 session 的关系
+
+#### 3. 非预期退出后的重启（unexpected-exit restart）
+
+非预期退出后的重启表示 FFmpeg 子进程异常退出后，bridge 根据重启策略尝试恢复。
+
+行为约定：
+
+- 保留当前已连接的 websocket client
+- 按配置的重启策略尝试自动拉起 FFmpeg
+- 达到最大重启次数后，将 session 标记为 `errored`
+- 不等同于手动停止
+- session 是否最终销毁，仍由 `StreamManager` 根据剩余 client 决定
+
+典型场景：
+
+- FFmpeg 子进程异常退出
+- 上游流短暂异常导致 bridge 进程退出
+
+#### 4. Session 销毁（session destroy）
+
+Session 销毁由 `StreamManager` 统一负责。
+
+行为约定：
+
+- 只有在 **没有 websocket client 剩余** 时，才允许销毁 session
+- 仍有客户端连接时，不应销毁 session
+- idle recovery / restart 期间，不应因为进程重启而误销毁活跃 session
+
+### 当前恢复规则
+
+当前阶段遵循以下规则：
 
 - **FFmpeg 非预期退出会触发重启**
 - **主动 stop 不会触发重启**
 - **长时间无数据会触发基于 restart 的恢复**
+- **恢复流程应尽量保留已有 websocket client**
+- **只有在没有 websocket client 时才允许销毁 session**
 - **达到最大重启次数后停止继续自动拉起**
 
-这套策略足够支撑第一阶段“先稳定、后扩展”的目标。
+这套策略足够支撑第一阶段“先稳定、后扩展”的目标，同时保证生命周期边界更清晰，便于后续继续扩展 shared upstream、鉴权、监控与更多 bridge 能力。
 
 ---
 

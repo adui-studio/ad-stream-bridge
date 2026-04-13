@@ -4,12 +4,23 @@
 
 本页说明当前阶段的基础恢复策略设计。
 
-第一阶段恢复策略的目标不是复杂，而是明确、可观察、可调试：
+第一阶段恢复策略的目标不是复杂，而是**明确、可观察、可调试、可验证**：
 
 - FFmpeg 非主动退出时会尝试自动重启
 - 主动 stop 不会触发自动重启
 - 长时间无数据输出会触发恢复
+- 恢复过程中尽量保留当前 websocket client
 - 达到最大重启次数后停止继续自动拉起
+- 只有在没有 client 时才允许销毁 session
+
+当前阶段会明确区分两类操作：
+
+- **FFmpeg 进程重启**
+- **Session 销毁**
+
+这两者不是同一个动作，不能混为一体。
+
+---
 
 ## 目标
 
@@ -19,6 +30,55 @@
 - RTSP 上游不可用导致 session 失效
 - FFmpeg 进程仍在但长时间没有数据输出
 - 无控制的无限重试
+- 恢复流程中误清理 websocket client
+- 进程重启时误销毁仍在服务中的 session
+
+---
+
+## Session 生命周期边界
+
+### 1. recovery restart 不等于 session destroy
+
+当 session 触发恢复性重启时：
+
+- 旧的 FFmpeg 进程会被停止
+- 在旧进程退出后重新拉起新的 FFmpeg 进程
+- 当前已连接的 websocket client 会被保留
+- 当前 session 不会因为 restart 而被销毁
+
+也就是说，restart 的目标是恢复推流能力，而不是结束 session。
+
+---
+
+### 2. manual stop 才会清理 client
+
+当 session 被显式停止时：
+
+- 停止 FFmpeg 进程
+- 禁止后续自动重启
+- 清理并解绑当前 session 下的 websocket client
+- 允许 session 进入最终清理流程
+
+这类行为表示“当前 session 已经被逻辑上结束”。
+
+---
+
+### 3. session destroy 由 StreamManager 决定
+
+session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamManager` 统一决策。
+
+当前阶段的规则是：
+
+- 只有在 **没有 websocket client 剩余** 时，才允许销毁 session
+- 如果仍有 client，session 不应被 destroy
+- idle recovery / restart 期间，不应误销毁活跃 session
+
+这意味着：
+
+- **进程退出 != session 结束**
+- **进程重启 != session 销毁**
+
+---
 
 ## 自动重启
 
@@ -40,6 +100,14 @@
 - `lastExitCode`
 - `lastExitSignal`
 
+当前语义下，自动重启默认会：
+
+- 尽量保留当前 websocket client
+- 恢复 FFmpeg 推流能力
+- 不主动销毁 session
+
+---
+
 ## 手动停止不重启
 
 这是当前阶段的一个关键判定。
@@ -58,6 +126,13 @@
 - 无 client 的情况下继续占用资源
 - manager 清理链路被重启逻辑干扰
 
+同时，manual stop 允许：
+
+- 清理 websocket client 绑定关系
+- 将 session 推入最终清理流程
+
+---
+
 ## Idle Recovery
 
 ### 背景
@@ -65,6 +140,8 @@
 有些情况下 FFmpeg 进程不一定直接退出，但上游流已经失效，或者 FFmpeg 已经无法继续产出有效数据。
 
 仅依靠 exit/error 事件，不足以识别这类“活着但没输出”的状态。
+
+---
 
 ### 判定方式
 
@@ -79,13 +156,20 @@
 
 则会被认为处于 idle/stalled 状态。
 
+---
+
 ### 恢复动作
 
 当前阶段采用最简单、最稳妥的策略：
 
 - 直接触发 `restart()`
+- `restart()` 只负责恢复 FFmpeg 进程
+- recovery 期间默认保留当前 websocket client
+- restart 不负责销毁 session
 
-这样可以复用当前已有的 restart 逻辑，不需要额外引入多层恢复状态机。
+这样可以复用当前已有的 restart 生命周期，而不需要额外引入第二套恢复状态机。
+
+---
 
 ## 最大重启次数保护
 
@@ -109,6 +193,14 @@ restartCount >= STREAM_MAX_RESTARTS
 - 无意义地不断创建新进程
 - 资源被异常重试耗尽
 
+注意：
+
+- 达到最大重启次数后，session 会进入 `errored`
+- 但这并不自动等于“立刻 destroy”
+- 是否最终清理，仍由 `StreamManager` 基于 client 数量和运行时清理路径决定
+
+---
+
 ## 相关配置
 
 恢复相关的主要环境变量有：
@@ -122,11 +214,21 @@ restartCount >= STREAM_MAX_RESTARTS
 
 ### 本地调试
 
-建议较小值，方便验证恢复行为。
+建议较小值，方便验证恢复行为，例如：
+
+- 更短的 idle timeout
+- 更短的 restart delay
+- 较小的 max restart 次数
 
 ### 生产环境
 
-建议较稳妥值，避免过于敏感导致误恢复。
+建议较稳妥值，避免过于敏感导致误恢复，例如：
+
+- 更保守的 idle timeout
+- 更合理的重启间隔
+- 有上限的自动恢复次数
+
+---
 
 ## 当前限制
 
@@ -136,7 +238,18 @@ restartCount >= STREAM_MAX_RESTARTS
 - 滚动窗口重试统计
 - 多级恢复策略
 - shared upstream 级别恢复
-- 与 metrics/alerting 平台的直接打通
+- 与 metrics / alerting 平台的直接打通
+- 多种恢复优先级编排
+- 更复杂的 session 状态机
+
+当前阶段优先保证的是：
+
+- 生命周期边界清晰
+- websocket client 不被误清理
+- manager 清理职责明确
+- 恢复路径可追踪、可调试
+
+---
 
 ## 调试建议
 
@@ -147,6 +260,8 @@ restartCount >= STREAM_MAX_RESTARTS
 3. 看 FFmpeg stderr 日志
 4. 看 session exit / restart / idle recovery 日志
 5. 检查 RTSP 地址是否真实可用
+6. 确认当前 session 是否仍有 websocket client
+7. 确认是否误触发了 destroy 路径
 
 推荐重点关注的日志字段：
 
@@ -154,3 +269,10 @@ restartCount >= STREAM_MAX_RESTARTS
 - `sessionId`
 - `pid`
 - `reason`
+
+如果问题集中在“恢复后客户端仍收不到数据”，优先检查：
+
+- restart 后 client 是否仍在 session 中
+- FFmpeg 是否在旧进程退出后成功重启
+- `lastDataAt` 是否继续更新
+- `clientCount` 是否在恢复期间被意外清零

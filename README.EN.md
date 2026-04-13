@@ -323,14 +323,84 @@ STREAM_SWEEP_INTERVAL_MS=10000
 
 ## Recovery Strategy
 
-Current recovery behavior is intentionally simple and explicit:
+Current recovery behavior is intentionally explicit and conservative.
+
+At this stage, the project treats **FFmpeg process restart** and **session teardown** as different lifecycle operations.
+
+### Session lifecycle semantics
+
+#### 1. Manual stop
+
+A manual stop means the current session is explicitly terminated.
+
+Behavior:
+
+- stops the current FFmpeg process
+- disables further automatic restart
+- clears and detaches all websocket clients from the session
+- allows the session to enter teardown / destroy flow
+
+Typical cases:
+
+- the last websocket client disconnects and the service decides to release resources
+- the server explicitly stops the current stream session
+
+#### 2. Recovery restart
+
+A recovery restart means the session is still valid, but FFmpeg needs to be restarted in order to recover media output.
+
+Behavior:
+
+- stops the old FFmpeg process
+- preserves currently attached websocket clients
+- starts a new FFmpeg process after the old process exits
+- does not destroy the session itself
+- is intended to be as transparent as possible to connected clients
+
+Typical cases:
+
+- stdout data stops arriving for too long and idle recovery is triggered
+- the bridge needs to recover stream output without losing client-session continuity
+
+#### 3. Unexpected-exit restart
+
+An unexpected-exit restart means the FFmpeg subprocess exited unexpectedly and the bridge tries to recover based on restart policy.
+
+Behavior:
+
+- preserves currently attached websocket clients
+- retries FFmpeg startup according to the configured restart policy
+- moves the session into `errored` state after the max restart limit is reached
+- is not treated as a manual stop
+- final session teardown is still decided by `StreamManager` based on remaining clients
+
+Typical cases:
+
+- FFmpeg exits unexpectedly
+- upstream instability temporarily breaks the bridge process
+
+#### 4. Session destroy
+
+Session destroy is owned by `StreamManager`.
+
+Behavior:
+
+- a session should only be destroyed when **no websocket clients remain**
+- a session must not be destroyed while clients are still attached
+- idle recovery / restart should not accidentally destroy a live session
+
+### Current recovery rules
+
+The current phase follows these rules:
 
 - **unexpected FFmpeg exit triggers restart**
-- **manual stop does not restart**
+- **manual stop does not trigger restart**
 - **idle timeout triggers restart-based recovery**
+- **restart should preserve existing websocket clients whenever possible**
+- **session destroy only happens when no websocket clients remain**
 - **retries stop after the configured max restart count**
 
-This is enough for Phase 1 to prioritize correctness and operability without over-designing the runtime.
+This is enough for Phase 1 to prioritize correctness, cleanup behavior, and operability without over-designing the runtime.
 
 ---
 
