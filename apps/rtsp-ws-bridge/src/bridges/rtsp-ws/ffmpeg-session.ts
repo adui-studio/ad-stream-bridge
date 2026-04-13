@@ -38,7 +38,7 @@ export interface FfmpegSessionSnapshot {
 interface ClientBinding {
   clientIp?: string;
   closeHandler: () => void;
-  errorHandler: (arg0: Error) => void;
+  errorHandler: (error: Error) => void;
 }
 
 type StopMode = 'shutdown' | 'restart';
