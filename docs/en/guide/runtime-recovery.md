@@ -20,8 +20,6 @@ At this stage, the runtime explicitly distinguishes between:
 
 These are not the same operation and must not be treated as one.
 
----
-
 ## Goals
 
 The current recovery strategy is designed to address:
@@ -32,8 +30,6 @@ The current recovery strategy is designed to address:
 - uncontrolled infinite restart loops
 - accidental websocket client cleanup during recovery
 - accidental session destroy during process restart
-
----
 
 ## Session Lifecycle Boundaries
 
@@ -48,8 +44,6 @@ When a session enters recovery restart:
 
 In other words, restart is intended to recover stream output, not to end the session.
 
----
-
 ### 2. Manual stop is allowed to clear clients
 
 When a session is intentionally stopped:
@@ -60,8 +54,6 @@ When a session is intentionally stopped:
 - the session becomes eligible for final teardown
 
 This means the session has been logically ended by runtime intent.
-
----
 
 ### 3. Session destroy is owned by StreamManager
 
@@ -77,8 +69,6 @@ This means:
 
 - **process exit != session end**
 - **process restart != session destroy**
-
----
 
 ## Automatic Restart
 
@@ -106,8 +96,6 @@ Under the current lifecycle rules, automatic restart is expected to:
 - recover FFmpeg stream output
 - avoid destroying the session by default
 
----
-
 ## Manual Stop Does Not Restart
 
 This is a key rule in the current phase.
@@ -131,8 +119,6 @@ At the same time, manual stop is allowed to:
 - clear websocket client bindings
 - move the session toward final teardown
 
----
-
 ## Idle Recovery
 
 ### Background
@@ -140,8 +126,6 @@ At the same time, manual stop is allowed to:
 Some failures do not appear as a direct process exit. FFmpeg may remain alive while upstream is already unusable, or the process may no longer produce valid stdout data.
 
 Relying only on exit/error events is not enough to detect this class of failure.
-
----
 
 ### Detection Rule
 
@@ -154,8 +138,6 @@ A session is treated as idle/stalled when all the following are true:
 - `lastDataAt` has not been updated for too long
 - the threshold exceeds `STREAM_IDLE_TIMEOUT_MS`
 
----
-
 ### Recovery Action
 
 In Phase 1, the simplest and safest action is used:
@@ -166,8 +148,6 @@ In Phase 1, the simplest and safest action is used:
 - restart does not destroy the session
 
 This allows the idle recovery path to reuse the existing restart lifecycle instead of introducing a second recovery state machine.
-
----
 
 ## Max Restart Protection
 
@@ -197,8 +177,6 @@ Note:
 - this does not automatically mean immediate session teardown
 - final cleanup is still decided by `StreamManager` based on client presence and cleanup flow
 
----
-
 ## Related Configuration
 
 The main recovery-related env variables are:
@@ -226,8 +204,6 @@ Use more conservative values to avoid overly sensitive recovery behavior, for ex
 - more reasonable restart delay
 - bounded automatic recovery attempts
 
----
-
 ## Current Limitations
 
 Phase 1 intentionally keeps recovery simple and does not yet include:
@@ -246,8 +222,6 @@ At this stage, the priorities are:
 - avoiding accidental websocket client cleanup
 - clear manager cleanup ownership
 - recovery paths that are easy to trace and debug
-
----
 
 ## Debugging Tips
 

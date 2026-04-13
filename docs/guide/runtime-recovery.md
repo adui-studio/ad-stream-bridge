@@ -20,8 +20,6 @@
 
 这两者不是同一个动作，不能混为一体。
 
----
-
 ## 目标
 
 当前恢复策略主要解决以下问题：
@@ -32,8 +30,6 @@
 - 无控制的无限重试
 - 恢复流程中误清理 websocket client
 - 进程重启时误销毁仍在服务中的 session
-
----
 
 ## Session 生命周期边界
 
@@ -48,8 +44,6 @@
 
 也就是说，restart 的目标是恢复推流能力，而不是结束 session。
 
----
-
 ### 2. manual stop 才会清理 client
 
 当 session 被显式停止时：
@@ -60,8 +54,6 @@
 - 允许 session 进入最终清理流程
 
 这类行为表示“当前 session 已经被逻辑上结束”。
-
----
 
 ### 3. session destroy 由 StreamManager 决定
 
@@ -77,8 +69,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 
 - **进程退出 != session 结束**
 - **进程重启 != session 销毁**
-
----
 
 ## 自动重启
 
@@ -106,8 +96,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 - 恢复 FFmpeg 推流能力
 - 不主动销毁 session
 
----
-
 ## 手动停止不重启
 
 这是当前阶段的一个关键判定。
@@ -131,8 +119,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 - 清理 websocket client 绑定关系
 - 将 session 推入最终清理流程
 
----
-
 ## Idle Recovery
 
 ### 背景
@@ -140,8 +126,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 有些情况下 FFmpeg 进程不一定直接退出，但上游流已经失效，或者 FFmpeg 已经无法继续产出有效数据。
 
 仅依靠 exit/error 事件，不足以识别这类“活着但没输出”的状态。
-
----
 
 ### 判定方式
 
@@ -156,8 +140,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 
 则会被认为处于 idle/stalled 状态。
 
----
-
 ### 恢复动作
 
 当前阶段采用最简单、最稳妥的策略：
@@ -168,8 +150,6 @@ session 是否销毁，不由 FFmpeg 进程退出本身决定，而由 `StreamMa
 - restart 不负责销毁 session
 
 这样可以复用当前已有的 restart 生命周期，而不需要额外引入第二套恢复状态机。
-
----
 
 ## 最大重启次数保护
 
@@ -199,8 +179,6 @@ restartCount >= STREAM_MAX_RESTARTS
 - 但这并不自动等于“立刻 destroy”
 - 是否最终清理，仍由 `StreamManager` 基于 client 数量和运行时清理路径决定
 
----
-
 ## 相关配置
 
 恢复相关的主要环境变量有：
@@ -228,8 +206,6 @@ restartCount >= STREAM_MAX_RESTARTS
 - 更合理的重启间隔
 - 有上限的自动恢复次数
 
----
-
 ## 当前限制
 
 当前阶段恢复策略仍有意保持简化，不做以下内容：
@@ -248,8 +224,6 @@ restartCount >= STREAM_MAX_RESTARTS
 - websocket client 不被误清理
 - manager 清理职责明确
 - 恢复路径可追踪、可调试
-
----
 
 ## 调试建议
 
