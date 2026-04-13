@@ -274,3 +274,143 @@ If the problem is “recovery completed but clients still receive no media”, c
 - whether FFmpeg restarted successfully after the old process exited
 - whether `lastDataAt` continues to move forward
 - whether `clientCount` was unexpectedly reduced to zero during recovery
+
+## Local Testing and Verification
+
+To keep runtime recovery behavior stable as the project evolves, `rtsp-ws-bridge` includes lifecycle-oriented regression tests.
+
+These tests do not aim to validate FFmpeg encoding itself. Their main purpose is to protect the most important runtime guarantees of Phase 1:
+
+- FFmpeg session lifecycle correctness
+- restart / recovery semantics
+- websocket client retention and cleanup behavior
+- stream manager orchestration behavior
+- `/healthz` response structure stability
+
+### Current test approach
+
+The current test setup uses:
+
+- Node built-in test runner: `node:test`
+- TypeScript execution via: `tsx`
+- Test directory: `apps/rtsp-ws-bridge/test/`
+
+Why this approach is used:
+
+- no heavy test framework is required
+- it matches the current TypeScript / Node setup of the repository
+- it is sufficient for Phase 1 lifecycle regression coverage
+- it can be extended later without introducing early tooling complexity
+
+### Common commands
+
+Run all `rtsp-ws-bridge` tests:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge test
+```
+
+Run typecheck:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge typecheck
+```
+
+Run lint:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge lint
+```
+
+Build the app:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge build
+```
+
+### Recommended local execution order
+
+Before submitting changes, it is recommended to run:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge test
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge typecheck
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge lint
+```
+
+If the current change touches runtime logic, also run:
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge build
+```
+
+### Current test coverage
+
+#### `ffmpeg-session.lifecycle.test.ts`
+
+Mainly covers:
+
+- whether recovery restart preserves websocket clients
+- whether manual stop clears websocket clients
+- whether unexpected exit triggers automatic restart
+- whether the session enters `errored` after the max restart limit is reached
+
+#### `stream-manager.lifecycle.test.ts`
+
+Mainly covers:
+
+- whether the first client attach triggers session start
+- whether multiple clients on the same stream reuse the same session
+- whether the last client disconnect triggers stop + destroy
+- whether the websocket error path also triggers cleanup
+
+#### `stream-manager.idle-recovery.test.ts`
+
+Mainly covers:
+
+- whether idle timeout triggers restart
+- whether no-client sessions are destroyed instead of restarted
+- whether non-`running` sessions avoid accidental idle recovery
+
+#### `health-route.test.ts`
+
+Mainly covers:
+
+- whether `/healthz` returns 200
+- whether the top-level response structure is complete
+- whether `bridge` / `sessions` keep a stable structure
+- whether `streamManager` data is correctly exposed by the route
+
+### Debugging tips
+
+If a test fails, inspect in this order:
+
+1. determine whether the test itself is wrong or the runtime behavior has changed
+2. if a session lifecycle test fails, inspect:
+   - `state`
+   - `restartCount`
+   - `lastRestartAt`
+   - `lastStartedAt`
+   - `lastStoppedAt`
+   - `lastDataAt`
+   - `clientCount`
+3. if a manager test fails, check:
+   - whether a session was created more than once
+   - whether `start()` was triggered multiple times
+   - whether `stop()` only happens when no clients remain
+   - whether websocket `close` / `error` paths reached cleanup
+4. if a `/healthz` test fails, check:
+   - whether the route is registered
+   - whether `streamManager.getRuntimeStats()` changed shape
+   - whether `streamManager.getAllSessionSnapshots()` still returns serializable data
+
+### Note
+
+These tests are primarily designed to protect lifecycle semantics, not to replace real RTSP / FFmpeg environment validation.
+
+In other words:
+
+- tests protect runtime behavior and boundaries
+- real local RTSP source validation confirms external dependency behavior
+
+Both are important, but they serve different purposes and should not be treated as the same thing.

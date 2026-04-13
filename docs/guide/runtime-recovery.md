@@ -276,3 +276,143 @@ restartCount >= STREAM_MAX_RESTARTS
 - FFmpeg 是否在旧进程退出后成功重启
 - `lastDataAt` 是否继续更新
 - `clientCount` 是否在恢复期间被意外清零
+
+## 本地测试与验证
+
+为了保证当前阶段的恢复策略可以稳定迭代，`rtsp-ws-bridge` 已经补充了生命周期相关回归测试。
+
+这些测试的目标不是验证 FFmpeg 编码能力本身，而是优先保护以下行为：
+
+- FFmpeg session 生命周期正确性
+- restart / recovery 语义是否正确
+- websocket client 是否被正确保留或清理
+- stream manager 的 session 编排行为
+- `/healthz` 运行态输出结构是否稳定
+
+### 当前测试方式
+
+当前测试采用以下方案：
+
+- Node 内置测试运行器：`node:test`
+- TypeScript 运行方式：`tsx`
+- 测试目录：`apps/rtsp-ws-bridge/test/`
+
+这样做的原因是：
+
+- 不额外引入重量级测试框架
+- 与当前仓库的 TypeScript / Node 运行方式兼容
+- 足够支撑第一阶段的生命周期回归测试需求
+- 后续可以在此基础上继续扩展
+
+### 常用命令
+
+运行 `rtsp-ws-bridge` 全部测试：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge test
+```
+
+运行类型检查：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge typecheck
+```
+
+运行 lint：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge lint
+```
+
+构建应用：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge build
+```
+
+### 推荐执行顺序
+
+建议每次提交前至少执行一次：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge test
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge typecheck
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge lint
+```
+
+如果本次改动涉及运行时逻辑，再补一次：
+
+```bash
+pnpm --filter @ad-stream-bridge/rtsp-ws-bridge build
+```
+
+### 当前测试覆盖说明
+
+#### `ffmpeg-session.lifecycle.test.ts`
+
+主要覆盖：
+
+- recovery restart 是否保留 websocket client
+- manual stop 是否清理 websocket client
+- unexpected exit 是否触发自动重启
+- 达到最大重启次数后是否进入 `errored`
+
+#### `stream-manager.lifecycle.test.ts`
+
+主要覆盖：
+
+- 首个 client attach 时是否触发 session start
+- 同一 stream 的多个 client 是否复用同一个 session
+- 最后一个 client 断开时是否触发 stop + destroy
+- websocket error 路径是否会触发 cleanup
+
+#### `stream-manager.idle-recovery.test.ts`
+
+主要覆盖：
+
+- idle timeout 是否触发 restart
+- 没有 client 时是否走 destroy 而不是 restart
+- 非 `running` 状态下是否不会误触发 idle recovery
+
+#### `health-route.test.ts`
+
+主要覆盖：
+
+- `/healthz` 是否返回 200
+- 顶层字段结构是否完整
+- `bridge` / `sessions` 结构是否稳定
+- `streamManager` 数据是否正确透传到响应中
+
+### 调试建议
+
+如果测试失败，建议按下面顺序排查：
+
+1. 先确认是测试本身失败，还是运行时代码行为已变更
+2. 如果是 session 生命周期测试失败，重点看：
+   - `state`
+   - `restartCount`
+   - `lastRestartAt`
+   - `lastStartedAt`
+   - `lastStoppedAt`
+   - `lastDataAt`
+   - `clientCount`
+3. 如果是 manager 测试失败，重点确认：
+   - session 是否被重复创建
+   - `start()` 是否被重复调用
+   - `stop()` 是否只在无 client 时触发
+   - websocket `close` / `error` 是否走到了 cleanup 路径
+4. 如果是 `/healthz` 测试失败，重点确认：
+   - route 是否已注册
+   - `streamManager.getRuntimeStats()` 返回结构是否变化
+   - `streamManager.getAllSessionSnapshots()` 是否返回可序列化数据
+
+### 说明
+
+当前测试更偏向“生命周期语义回归保护”，而不是“真实 RTSP / FFmpeg 外部环境验证”。
+
+也就是说：
+
+- 测试负责保护逻辑边界
+- 本地真实 RTSP 源验证负责确认外部依赖行为
+
+两者都重要，但职责不同，不应混为一体。
