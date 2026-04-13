@@ -58,14 +58,20 @@ async function waitFor(
   assert.fail(options?.message ?? 'waitFor timeout');
 }
 
-function createSession(script: string): FfmpegSession {
+function createSession(
+  script: string,
+  overrides?: {
+    restartDelayMs?: number;
+    maxRestarts?: number;
+  }
+): FfmpegSession {
   return new FfmpegSession({
     streamId: 'camera-a',
     rtspUrl: 'rtsp://example.local/live/camera-a',
     ffmpegPath: process.execPath,
     ffmpegArgs: ['-e', script],
-    restartDelayMs: 100,
-    maxRestarts: 3
+    restartDelayMs: overrides?.restartDelayMs ?? 100,
+    maxRestarts: overrides?.maxRestarts ?? 3
   });
 }
 
@@ -188,4 +194,70 @@ test('unexpected child exit keeps websocket clients and auto restarts session', 
   await waitFor(() => session.getSnapshot().state === 'stopped', {
     message: 'expected teardown stop to finish'
   });
+});
+
+test('reaches max restart limit and enters errored state while preserving websocket clients', async () => {
+  const session = createSession(
+    buildProducerScript({
+      intervalMs: 30,
+      autoExitAfterMs: 90
+    }),
+    {
+      restartDelayMs: 60,
+      maxRestarts: 2
+    }
+  );
+
+  const ws = new MockWebSocket();
+
+  session.attachClient({
+    ws: ws as never,
+    clientIp: '127.0.0.1'
+  });
+
+  session.start();
+
+  await waitFor(() => ws.sent.length >= 1, {
+    message: 'expected initial stdout before repeated unexpected exits'
+  });
+
+  await waitFor(
+    () => {
+      const snapshot = session.getSnapshot();
+      return snapshot.state === 'errored';
+    },
+    {
+      timeoutMs: 8000,
+      message: 'expected session to enter errored state after reaching max restart limit'
+    }
+  );
+
+  const snapshotAfterLimit = session.getSnapshot();
+
+  assert.equal(snapshotAfterLimit.state, 'errored');
+  assert.equal(snapshotAfterLimit.restartCount, 2);
+  assert.equal(snapshotAfterLimit.clientCount, 1);
+  assert.ok(snapshotAfterLimit.lastRestartAt !== null);
+  assert.ok(snapshotAfterLimit.lastExitCode !== null || snapshotAfterLimit.lastExitSignal !== null);
+
+  const sentCountAtErrored = ws.sent.length;
+
+  await delay(300);
+
+  const snapshotAfterWait = session.getSnapshot();
+
+  assert.equal(snapshotAfterWait.state, 'errored');
+  assert.equal(snapshotAfterWait.restartCount, 2);
+  assert.equal(ws.sent.length, sentCountAtErrored);
+
+  session.stop('test teardown after max restart limit');
+
+  await waitFor(() => session.getSnapshot().state === 'stopped', {
+    message: 'expected teardown stop after errored state'
+  });
+
+  const snapshotAfterStop = session.getSnapshot();
+
+  assert.equal(snapshotAfterStop.clientCount, 0);
+  assert.equal(snapshotAfterStop.state, 'stopped');
 });
