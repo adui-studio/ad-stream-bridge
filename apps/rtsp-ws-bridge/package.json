@@ -19,7 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"console.log('No tests yet for @ad-stream-bridge/rtsp-ws-bridge')\"",
+    "test": "node --import tsx --test test/**/*.test.ts",
     "clean": "rimraf dist"
   },
   "dependencies": {
