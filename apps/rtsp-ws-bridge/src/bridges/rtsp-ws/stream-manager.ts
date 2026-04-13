@@ -2,6 +2,7 @@ import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
 import { env } from '../../config/env.js';
 import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
+import { resolveRtspUrl } from './resolve-rtsp-url.js';
 
 export interface AttachClientInput {
   streamId: string;
@@ -26,20 +27,6 @@ function normalizeNumber(raw: number | undefined, fallback: number): number {
   }
 
   return fallback;
-}
-
-function resolveRtspUrl(streamId: string, rtspUrl?: string): string {
-  const normalized = rtspUrl?.trim();
-
-  if (normalized) {
-    return normalized;
-  }
-
-  if (DEFAULT_RTSP_URL_TEMPLATE) {
-    return DEFAULT_RTSP_URL_TEMPLATE.replace('{id}', streamId);
-  }
-
-  throw new Error(`missing rtsp url for stream ${streamId}`);
 }
 
 export class StreamManager {
@@ -190,7 +177,10 @@ export class StreamManager {
       return existing;
     }
 
-    const resolvedRtspUrl = resolveRtspUrl(streamId, rtspUrl);
+    const resolvedRtspUrl = resolveRtspUrl(streamId, {
+      directRtspUrl: rtspUrl,
+      rtspUrlTemplate: DEFAULT_RTSP_URL_TEMPLATE
+    });
 
     const session = new FfmpegSession({
       streamId,
@@ -237,8 +227,6 @@ export class StreamManager {
       return;
     }
 
-    // 只有 session 仍然存在于 registry 中时，才允许 stop + delete
-    // 这样可以避免重复 close/error 清理时出现重复 destroy 语义。
     managedSession.session.stop('no websocket clients remain');
     this.sessions.delete(streamId);
 
@@ -295,13 +283,11 @@ export class StreamManager {
     for (const [streamId, managedSession] of this.sessions.entries()) {
       const snapshot = managedSession.session.getSnapshot();
 
-      // 有 client 才值得做 recovery；没有 client 的 session 应由 cleanup 路径销毁
       if (snapshot.clientCount === 0) {
         this.cleanupSessionIfIdle(streamId, 'sweep_no_clients');
         continue;
       }
 
-      // 非 running 状态不做 idle recovery
       if (snapshot.state !== 'running') {
         continue;
       }
