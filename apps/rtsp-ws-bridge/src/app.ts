@@ -2,6 +2,16 @@ import express, { type Application, type Request, type Response } from 'express'
 import { requestLogger } from './middleware/request-logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 
+function isDebugRoutesEnabled(): boolean {
+  const value = process.env.ENABLE_DEBUG_ROUTES?.trim().toLowerCase();
+
+  if (!value) {
+    return false;
+  }
+
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
 export function createApp(): Application {
   const app = express();
 
@@ -17,6 +27,12 @@ export function createApp(): Application {
       timestamp: new Date().toISOString()
     });
   });
+
+  if (isDebugRoutesEnabled()) {
+    app.get('/error-test', () => {
+      throw new Error('intentional test error');
+    });
+  }
 
   registerHealthRoutes(app);
 
