@@ -18,10 +18,6 @@ export function createApp(): Application {
     });
   });
 
-  app.get('/error-test', () => {
-    throw new Error('intentional test error');
-  });
-
   registerHealthRoutes(app);
 
   return app;
