@@ -199,6 +199,42 @@ curl http://localhost:3000/healthz
 5. 再次 `GET /healthz`
 6. 观察日志中的 session create / start / exit / restart / destroy
 
+## 调试路由说明
+
+当前项目中，像 `/error-test` 这类仅用于调试的路由，**默认不会在运行时注册**。
+
+这样做的目的，是避免在常规开发、演示或部署环境中无意暴露错误注入入口。
+
+### 默认行为
+
+默认情况下：
+
+- `/error-test` 不可访问
+- 请求该路径应返回 `404`
+- 常规运行路径中不应包含仅用于调试的测试路由
+
+### 如何显式开启
+
+如果确实需要验证错误处理中间件或调试错误链路，可以通过环境变量显式开启：
+
+```env
+ENABLE_DEBUG_ROUTES=true
+```
+
+例如：
+
+```bash
+ENABLE_DEBUG_ROUTES=true pnpm dev:rtsp-ws-bridge
+```
+
+开启后，`/error-test` 会被注册，用于主动触发测试错误。
+
+### 注意事项
+
+- 该能力仅用于本地调试或受控开发环境
+- 不建议在常规运行环境中开启
+- 不应将 debug route 作为业务功能或外部依赖的一部分
+
 ## 常见启动问题
 
 ### `spawn ffmpeg ENOENT`

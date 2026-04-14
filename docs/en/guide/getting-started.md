@@ -199,6 +199,42 @@ Recommended verification order:
 5. `GET /healthz` again
 6. inspect session create / start / exit / restart / destroy logs
 
+## Debug Routes
+
+Debug-only routes such as `/error-test` are **not registered by default**.
+
+This is intentional, so regular runtime environments do not expose error-injection endpoints unless they are explicitly needed.
+
+### Default behavior
+
+By default:
+
+- `/error-test` is not available
+- requests to that path should return `404`
+- normal runtime paths should not include debug-only routes
+
+### How to enable explicitly
+
+If you need to test error middleware behavior or debug the error handling path, enable debug routes explicitly with:
+
+```env
+ENABLE_DEBUG_ROUTES=true
+```
+
+For example:
+
+```bash
+ENABLE_DEBUG_ROUTES=true pnpm dev:rtsp-ws-bridge
+```
+
+When enabled, `/error-test` will be registered and can be used to trigger a test error intentionally.
+
+### Notes
+
+- this is intended only for local debugging or controlled development environments
+- it should remain disabled in regular runtime environments
+- debug routes should not be treated as part of the public or business-facing API surface
+
 ## Common Startup Issues
 
 ### `spawn ffmpeg ENOENT`
