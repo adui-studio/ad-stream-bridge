@@ -111,7 +111,8 @@ export default defineConfig({
               text: '参考',
               items: [
                 { text: 'API', link: '/reference/api' },
-                { text: 'Healthz', link: '/reference/healthz' }
+                { text: 'Healthz', link: '/reference/healthz' },
+                { text: '运行验证', link: '/reference/runtime-verification' }
               ]
             }
           ],
@@ -203,7 +204,8 @@ export default defineConfig({
               text: 'Reference',
               items: [
                 { text: 'API', link: '/en/reference/api' },
-                { text: 'Healthz', link: '/en/reference/healthz' }
+                { text: 'Healthz', link: '/en/reference/healthz' },
+                { text: 'Runtime Verification', link: '/en/reference/runtime-verification' }
               ]
             }
           ],
