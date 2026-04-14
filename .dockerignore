@@ -1,0 +1,15 @@
+.git
+.github
+.husky
+docs
+node_modules
+**/node_modules
+**/dist
+coverage
+.nyc_output
+.vitepress
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
