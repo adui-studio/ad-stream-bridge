@@ -178,18 +178,35 @@ export class StreamManager {
   getRuntimeStats(): {
     activeSessionCount: number;
     activeUpstreamCount: number;
+    totalClientCount: number;
     idleTimeoutMs: number;
     sweepIntervalMs: number;
     lastSweepAt: number | null;
+    upstreams: Array<{
+      streamId: string;
+      upstreamKey: string;
+      rtspUrl: string;
+      createdAt: number;
+      clientCount: number;
+      state: FfmpegSessionSnapshot['state'];
+      pid: number | null;
+      restartCount: number;
+      lastStartedAt: number | null;
+      lastDataAt: number | null;
+      lastErrorAt: number | null;
+      snapshot: FfmpegSessionSnapshot;
+    }>;
   } {
-    const activeUpstreamCount = this.upstreamRegistry.getActiveUpstreamCount();
+    const registryStats = this.upstreamRegistry.getRuntimeStats();
 
     return {
-      activeSessionCount: activeUpstreamCount,
-      activeUpstreamCount,
+      activeSessionCount: registryStats.activeUpstreamCount,
+      activeUpstreamCount: registryStats.activeUpstreamCount,
+      totalClientCount: registryStats.totalClientCount,
       idleTimeoutMs: this.idleTimeoutMs,
       sweepIntervalMs: this.sweepIntervalMs,
-      lastSweepAt: this.lastSweepAt
+      lastSweepAt: this.lastSweepAt,
+      upstreams: registryStats.upstreams
     };
   }
 

@@ -204,3 +204,88 @@ test('getSessionSnapshotByStreamId returns snapshot of active upstream', () => {
   assert.equal(snapshot?.streamId, 'camera-01');
   assert.equal(snapshot?.rtspUrl, 'rtsp://example.local/live/camera-01');
 });
+
+test('getRuntimeStats returns active upstream count and total client count', () => {
+  const registry = new UpstreamRegistry({
+    createSession: ({ streamId, rtspUrl }) =>
+      new FakeSession({
+        streamId,
+        rtspUrl,
+        sessionId: `session-${streamId}`
+      })
+  });
+
+  const upstreamA = registry.getOrCreate({
+    streamId: 'camera-01',
+    rtspUrl: 'rtsp://example.local/live/camera-01'
+  });
+
+  const upstreamB = registry.getOrCreate({
+    streamId: 'camera-02',
+    rtspUrl: 'rtsp://example.local/live/camera-02'
+  });
+
+  upstreamA.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  upstreamA.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  upstreamB.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  const stats = registry.getRuntimeStats();
+
+  assert.equal(stats.activeUpstreamCount, 2);
+  assert.equal(stats.totalClientCount, 3);
+  assert.equal(stats.upstreams.length, 2);
+
+  const first = stats.upstreams.find((item) => item.streamId === 'camera-01');
+  assert.ok(first);
+  assert.equal(first?.clientCount, 2);
+  assert.equal(first?.rtspUrl, 'rtsp://example.local/live/camera-01');
+});
+
+test('getTotalClientCount returns sum of all upstream client counts', () => {
+  const registry = new UpstreamRegistry({
+    createSession: ({ streamId, rtspUrl }) =>
+      new FakeSession({
+        streamId,
+        rtspUrl,
+        sessionId: `session-${streamId}`
+      })
+  });
+
+  const upstreamA = registry.getOrCreate({
+    streamId: 'camera-01',
+    rtspUrl: 'rtsp://example.local/live/camera-01'
+  });
+
+  const upstreamB = registry.getOrCreate({
+    streamId: 'camera-02',
+    rtspUrl: 'rtsp://example.local/live/camera-02'
+  });
+
+  upstreamA.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  upstreamB.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  upstreamB.session.attachClient({
+    ws: {} as WebSocket,
+    clientIp: '127.0.0.1'
+  });
+
+  assert.equal(registry.getTotalClientCount(), 3);
+});

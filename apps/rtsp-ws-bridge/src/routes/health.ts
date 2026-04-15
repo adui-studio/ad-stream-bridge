@@ -33,10 +33,13 @@ export function registerHealthRoutes(app: Application): void {
       },
       bridge: {
         activeSessionCount: runtime.activeSessionCount,
+        activeUpstreamCount: runtime.activeUpstreamCount,
+        totalClientCount: runtime.totalClientCount,
         idleTimeoutMs: runtime.idleTimeoutMs,
         sweepIntervalMs: runtime.sweepIntervalMs,
         lastSweepAt: runtime.lastSweepAt
       },
+      upstreams: runtime.upstreams,
       sessions
     });
   });

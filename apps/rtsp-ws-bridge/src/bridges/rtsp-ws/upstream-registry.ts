@@ -1,5 +1,6 @@
-import { logger } from '@adui/logger';
 import type { WebSocket } from 'ws';
+import { logger } from '@adui/logger';
+
 import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
 import { resolveUpstreamDescriptor } from './upstream-key.js';
 
@@ -25,11 +26,19 @@ export interface UpstreamRuntimeEntry {
   upstreamKey: string;
   rtspUrl: string;
   createdAt: number;
+  clientCount: number;
+  state: FfmpegSessionSnapshot['state'];
+  pid: number | null;
+  restartCount: number;
+  lastStartedAt: number | null;
+  lastDataAt: number | null;
+  lastErrorAt: number | null;
   snapshot: FfmpegSessionSnapshot;
 }
 
 export interface UpstreamRegistryRuntimeStats {
   activeUpstreamCount: number;
+  totalClientCount: number;
   upstreams: UpstreamRuntimeEntry[];
 }
 
@@ -103,6 +112,7 @@ export class UpstreamRegistry {
         return upstream;
       }
     }
+
     return null;
   }
 
@@ -118,16 +128,38 @@ export class UpstreamRegistry {
     return this.upstreams.size;
   }
 
+  getTotalClientCount(): number {
+    return this.list().reduce((total, upstream) => {
+      return total + upstream.session.getSnapshot().clientCount;
+    }, 0);
+  }
+
   getRuntimeStats(): UpstreamRegistryRuntimeStats {
-    return {
-      activeUpstreamCount: this.upstreams.size,
-      upstreams: this.list().map((upstream) => ({
+    const upstreams = this.list().map((upstream) => {
+      const snapshot = upstream.session.getSnapshot();
+
+      return {
         streamId: upstream.streamId,
         upstreamKey: upstream.upstreamKey,
         rtspUrl: upstream.rtspUrl,
         createdAt: upstream.createdAt,
-        snapshot: upstream.session.getSnapshot()
-      }))
+        clientCount: snapshot.clientCount,
+        state: snapshot.state,
+        pid: snapshot.pid,
+        restartCount: snapshot.restartCount,
+        lastStartedAt: snapshot.lastStartedAt,
+        lastDataAt: snapshot.lastDataAt,
+        lastErrorAt: snapshot.lastErrorAt,
+        snapshot
+      };
+    });
+
+    return {
+      activeUpstreamCount: upstreams.length,
+      totalClientCount: upstreams.reduce((total, upstream) => {
+        return total + upstream.clientCount;
+      }, 0),
+      upstreams
     };
   }
 
