@@ -2,6 +2,8 @@ import type { Request } from 'express';
 import type expressWs from 'express-ws';
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
+
+import { bindLiveConnection } from '../bridges/rtsp-ws/live-connection.js';
 import { streamManager } from '../bridges/rtsp-ws/stream-manager.js';
 
 const STREAM_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -80,6 +82,7 @@ export function registerLiveRoutes(app: expressWs.Application): void {
 
     logger.info('stream websocket connection accepted', {
       streamId,
+      upstreamKey: null,
       sessionId: null,
       pid: null,
       reason: 'ws_connect',
@@ -89,18 +92,20 @@ export function registerLiveRoutes(app: expressWs.Application): void {
     });
 
     try {
-      streamManager.attachClient({
+      bindLiveConnection({
         streamId,
         ws,
         clientIp,
-        rtspUrl
+        rtspUrl,
+        streamManager
       });
     } catch (error) {
       logger.error('stream websocket connection initialization failed', {
         streamId,
+        upstreamKey: null,
         sessionId: null,
         pid: null,
-        reason: 'stream_manager_attach_failed',
+        reason: 'live_connection_bind_failed',
         route: req.originalUrl,
         clientIp,
         error

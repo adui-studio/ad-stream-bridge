@@ -5,11 +5,19 @@ import { env } from '../../config/env.js';
 import type { FfmpegSessionSnapshot } from './ffmpeg-session.js';
 import { UpstreamRegistry } from './upstream-registry.js';
 
-export interface AttachClientInput {
+export interface OpenConnectionInput {
   streamId: string;
   ws: WebSocket;
   clientIp: string;
   rtspUrl?: string;
+}
+
+export interface OpenConnectionResult {
+  streamId: string;
+  upstreamKey: string;
+  rtspUrl: string;
+  rtspUrlSource: 'query' | 'template' | 'unknown';
+  sessionSnapshot: FfmpegSessionSnapshot;
 }
 
 const DEFAULT_RTSP_URL_TEMPLATE = env.rtspUrlTemplate;
@@ -20,6 +28,7 @@ function normalizeNumber(raw: number | undefined, fallback: number): number {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
     return raw;
   }
+
   return fallback;
 }
 
@@ -44,26 +53,26 @@ export class StreamManager {
       });
   }
 
-  attachClient(input: AttachClientInput): void {
+  openConnection(input: OpenConnectionInput): OpenConnectionResult {
     const { streamId, ws, clientIp, rtspUrl } = input;
 
-    const managedUpstream = this.upstreamRegistry.getOrCreate({
+    const upstream = this.upstreamRegistry.getOrCreate({
       streamId,
       rtspUrl
     });
 
-    const snapshotBeforeAttach = managedUpstream.session.getSnapshot();
+    const snapshotBeforeAttach = upstream.session.getSnapshot();
 
-    managedUpstream.session.attachClient({
+    upstream.session.attachClient({
       ws,
       clientIp
     });
 
-    const snapshotAfterAttach = managedUpstream.session.getSnapshot();
+    const snapshotAfterAttach = upstream.session.getSnapshot();
 
     logger.info('stream websocket client connected', {
       streamId,
-      upstreamKey: managedUpstream.upstreamKey,
+      upstreamKey: upstream.upstreamKey,
       sessionId: snapshotAfterAttach.sessionId,
       pid: snapshotAfterAttach.pid,
       reason: 'ws_connect',
@@ -72,92 +81,85 @@ export class StreamManager {
     });
 
     if (snapshotBeforeAttach.clientCount === 0) {
-      managedUpstream.session.start();
+      upstream.session.start();
     }
 
     this.ensureSweepStarted();
 
-    try {
-      ws.send(
-        JSON.stringify({
-          ok: true,
-          streamId,
-          upstreamKey: managedUpstream.upstreamKey,
-          message: 'live websocket connected',
-          rtspUrlSource: rtspUrl ? 'query' : DEFAULT_RTSP_URL_TEMPLATE ? 'template' : 'unknown',
-          timestamp: new Date().toISOString()
-        })
-      );
-    } catch (error) {
-      const snapshot = managedUpstream.session.getSnapshot();
+    return {
+      streamId,
+      upstreamKey: upstream.upstreamKey,
+      rtspUrl: upstream.rtspUrl,
+      rtspUrlSource: rtspUrl ? 'query' : DEFAULT_RTSP_URL_TEMPLATE ? 'template' : 'unknown',
+      sessionSnapshot: upstream.session.getSnapshot()
+    };
+  }
 
-      logger.error('stream websocket initial response failed', {
-        streamId,
-        upstreamKey: managedUpstream.upstreamKey,
-        sessionId: snapshot.sessionId,
-        pid: snapshot.pid,
-        reason: 'ws_init_send_failed',
-        clientIp,
-        error
-      });
+  closeConnection(input: {
+    streamId: string;
+    upstreamKey: string;
+    ws: WebSocket;
+    reason: string;
+  }): void {
+    const upstream = this.upstreamRegistry.get(input.upstreamKey);
 
-      managedUpstream.session.detachClient(ws, 'initial message send failed');
-      this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, 'initial_send_failed');
-      this.maybeStopSweep();
-
-      throw error;
+    if (!upstream) {
+      return;
     }
 
-    const cleanupForSocket = (reason: string) => {
-      managedUpstream.session.detachClient(ws, reason);
-      this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, reason);
-      this.maybeStopSweep();
-    };
+    upstream.session.detachClient(input.ws, input.reason);
+    this.upstreamRegistry.releaseIfUnused(input.upstreamKey, input.reason);
+    this.maybeStopSweep();
+  }
 
-    ws.on('close', (code, reason) => {
-      cleanupForSocket(`websocket close (${code}: ${reason.toString()})`);
+  handleClientMessage(input: {
+    streamId: string;
+    upstreamKey: string;
+    clientIp: string;
+    ws: WebSocket;
+    payload: string;
+  }): void {
+    const upstream = this.upstreamRegistry.get(input.upstreamKey);
+    const snapshot = upstream?.session.getSnapshot();
+
+    logger.info('stream websocket client message received', {
+      streamId: input.streamId,
+      upstreamKey: input.upstreamKey,
+      sessionId: snapshot?.sessionId ?? null,
+      pid: snapshot?.pid ?? null,
+      reason: 'ws_message',
+      clientIp: input.clientIp,
+      payload: input.payload
     });
 
-    ws.on('error', (error) => {
-      const snapshot = managedUpstream.session.getSnapshot();
+    input.ws.send(
+      JSON.stringify({
+        ok: true,
+        streamId: input.streamId,
+        upstreamKey: input.upstreamKey,
+        message: 'live route does not accept upstream control messages yet',
+        timestamp: new Date().toISOString()
+      })
+    );
+  }
 
-      logger.error('stream websocket client error', {
-        streamId,
-        upstreamKey: managedUpstream.upstreamKey,
-        sessionId: snapshot.sessionId,
-        pid: snapshot.pid,
-        reason: 'ws_error',
-        clientIp,
-        error
-      });
+  reportClientError(input: {
+    streamId: string;
+    upstreamKey: string;
+    clientIp: string;
+    error: unknown;
+  }): void {
+    const upstream = this.upstreamRegistry.get(input.upstreamKey);
+    const snapshot = upstream?.session.getSnapshot();
 
-      cleanupForSocket('websocket error');
-    });
-
-    ws.on('message', (message) => {
-      const payload = Buffer.isBuffer(message) ? message.toString('utf8') : String(message);
-
-      const snapshot = managedUpstream.session.getSnapshot();
-
-      logger.info('stream websocket client message received', {
-        streamId,
-        upstreamKey: managedUpstream.upstreamKey,
-        sessionId: snapshot.sessionId,
-        pid: snapshot.pid,
-        reason: 'ws_message',
-        clientIp,
-        payload
-      });
-
-      ws.send(
-        JSON.stringify({
-          ok: true,
-          streamId,
-          upstreamKey: managedUpstream.upstreamKey,
-          message: 'live route does not accept upstream control messages yet',
-          timestamp: new Date().toISOString()
-        })
-      );
+    logger.error('stream websocket client error', {
+      streamId: input.streamId,
+      upstreamKey: input.upstreamKey,
+      sessionId: snapshot?.sessionId ?? null,
+      pid: snapshot?.pid ?? null,
+      reason: 'ws_error',
+      clientIp: input.clientIp,
+      error: input.error
     });
   }
 
@@ -231,11 +233,11 @@ export class StreamManager {
   private runSweep(): void {
     this.lastSweepAt = Date.now();
 
-    for (const managedUpstream of this.upstreamRegistry.list()) {
-      const snapshot = managedUpstream.session.getSnapshot();
+    for (const upstream of this.upstreamRegistry.list()) {
+      const snapshot = upstream.session.getSnapshot();
 
       if (snapshot.clientCount === 0) {
-        this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, 'sweep_no_clients');
+        this.upstreamRegistry.releaseIfUnused(upstream.upstreamKey, 'sweep_no_clients');
         continue;
       }
 
@@ -244,18 +246,20 @@ export class StreamManager {
       }
 
       const referenceTime = snapshot.lastDataAt ?? snapshot.lastStartedAt;
+
       if (!referenceTime) {
         continue;
       }
 
       const idleForMs = Date.now() - referenceTime;
+
       if (idleForMs < this.idleTimeoutMs) {
         continue;
       }
 
       logger.warn('stream session idle recovery triggered', {
-        streamId: managedUpstream.streamId,
-        upstreamKey: managedUpstream.upstreamKey,
+        streamId: upstream.streamId,
+        upstreamKey: upstream.upstreamKey,
         sessionId: snapshot.sessionId,
         pid: snapshot.pid,
         reason: 'idle_timeout',
@@ -267,7 +271,7 @@ export class StreamManager {
         clientCount: snapshot.clientCount
       });
 
-      managedUpstream.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
+      upstream.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
     }
 
     this.maybeStopSweep();
