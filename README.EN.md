@@ -51,8 +51,8 @@ The current priority is not feature breadth. It is to make one path stable and o
 | WebSocket route `/live/:id`           | Done    |
 | FFmpeg session lifecycle              | Done    |
 | auto restart / idle recovery baseline | Done    |
-| `/healthz` runtime output             | Done    |
-| shared upstream                       | Not yet |
+| shared upstream                       | Done    |
+| `/healthz` shared upstream runtime    | Done    |
 | auth                                  | Not yet |
 | frontend player                       | Not yet |
 | other bridge protocols                | Not yet |
@@ -71,7 +71,6 @@ The current priority is not feature breadth. It is to make one path stable and o
 
 ### Not Included Yet
 
-- shared upstream
 - auth
 - admin console
 - frontend player
@@ -163,6 +162,32 @@ RTSP_URL_TEMPLATE=rtsp://your-rtsp-host/live/{id}
 ```text
 ws://localhost:3000/live/camera-01
 ```
+
+### Shared Upstream Verification
+
+The current version supports shared upstream reuse for the same RTSP source.
+
+Recommended minimal verification flow:
+
+1. connect two clients to the same RTSP upstream
+2. request `/healthz`
+3. inspect the following fields:
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams[*].upstreamKey`
+- `upstreams[*].clientCount`
+
+Expected result:
+
+- when two clients connect to the same upstream:
+  - `activeUpstreamCount = 1`
+  - `totalClientCount = 2`
+  - only one upstream entry appears in `upstreams`
+  - that upstream has `clientCount = 2`
+
+If different RTSP upstreams are used, multiple upstream entries should appear.
 
 ## Docker
 
@@ -288,13 +313,23 @@ Recommended inspection points:
 
 ## Current Limitations
 
-Phase 1 does **not** implement shared upstream yet.
+Phase 1 now includes baseline shared upstream support, but several limitations still remain.
 
-That means:
+Current limitations include:
 
-- upstream reuse for the same RTSP source is intentionally deferred
-- the current focus remains lifecycle correctness, cleanup, and runtime stability
-- shared upstream will be introduced later as a separate step
+- only `rtsp-ws-bridge` is supported
+- reuse is based on the final resolved RTSP upstream URL
+- auth and tenant isolation are not implemented yet
+- no admin console yet
+- no multi-protocol output expansion yet
+- no Kubernetes deployment guidance yet
+
+The current phase still focuses on:
+
+- lifecycle correctness
+- resource cleanup
+- automatic recovery
+- shared upstream runtime observability
 
 ## GitHub Workflow
 

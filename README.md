@@ -51,8 +51,8 @@
 | WebSocket 路由 `/live/:id`        | 已完成   |
 | FFmpeg session 生命周期           | 已完成   |
 | 自动重启 / idle recovery 基础能力 | 已完成   |
-| `/healthz` 运行态输出             | 已完成   |
-| shared upstream                   | 暂未实现 |
+| shared upstream                   | 已完成   |
+| `/healthz` shared upstream 运行态 | 已完成   |
 | 鉴权                              | 暂未实现 |
 | 前端播放器                        | 暂未实现 |
 | 其他协议 bridge                   | 暂未实现 |
@@ -71,7 +71,6 @@
 
 ### 暂不包含
 
-- shared upstream
 - 鉴权
 - 管理后台
 - 前端播放器
@@ -163,6 +162,32 @@ RTSP_URL_TEMPLATE=rtsp://your-rtsp-host/live/{id}
 ```text
 ws://localhost:3000/live/camera-01
 ```
+
+### Shared Upstream 验证
+
+当前版本已支持同一路 RTSP 上游复用。
+
+建议最小验证方式：
+
+1. 使用两个客户端连接同一个 RTSP 上游
+2. 访问 `/healthz`
+3. 观察以下字段：
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams[*].upstreamKey`
+- `upstreams[*].clientCount`
+
+预期现象：
+
+- 两个客户端连接同一路上游时：
+  - `activeUpstreamCount = 1`
+  - `totalClientCount = 2`
+  - `upstreams` 中只存在一条对应 upstream
+  - 该 upstream 的 `clientCount = 2`
+
+如果连接的是不同 RTSP 上游，则应看到多个 upstream 条目。
 
 ## Docker
 
@@ -288,13 +313,23 @@ FFMPEG_PATH=C:\ffmpeg\bin\ffmpeg.exe
 
 ## 当前限制
 
-当前 Phase 1 **不实现 shared upstream**。
+当前 Phase 1 **已实现 shared upstream 基础能力**，但仍有边界限制。
 
-这意味着：
+当前限制包括：
 
-- 同一路 RTSP 的上游复用能力暂不在当前阶段
-- 当前重点仍是链路正确性、资源清理和生命周期稳定
-- shared upstream 会在后续阶段独立推进
+- 仅支持 `rtsp-ws-bridge`
+- 共享复用基于最终解析后的 RTSP 上游地址
+- 尚未实现鉴权与租户隔离
+- 尚未实现管理后台
+- 尚未实现多协议输出扩展
+- 尚未实现 Kubernetes 级部署说明
+
+当前阶段重点仍然是：
+
+- 生命周期正确性
+- 资源清理
+- 自动恢复
+- shared upstream 运行态可观测性
 
 ## GitHub 工程流程
 

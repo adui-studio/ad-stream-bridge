@@ -4,14 +4,15 @@
 
 ## 适用范围
 
-当前文档仅适用于以下范围：
+当前文档适用于以下范围：
 
 - app：`rtsp-ws-bridge`
 - 数据流：`RTSP 输入 -> WebSocket-FLV 输出`
+- shared upstream 基础能力
+- `/healthz` upstream 运行态输出
 
 当前尚未实现：
 
-- shared upstream
 - 鉴权
 - 管理后台
 - 多协议 bridge
@@ -23,9 +24,9 @@
 
 ### 1. 安装依赖
 
-````bash
+```bash
 pnpm install --frozen-lockfile
-~~~
+```
 
 ### 2. 准备环境变量
 
@@ -35,7 +36,7 @@ Linux / macOS：
 
 ```bash
 cp .env.example .env
-````
+```
 
 PowerShell：
 
@@ -159,6 +160,20 @@ curl http://localhost:3000/healthz
 docker compose logs --tail=200
 ```
 
+### 4. Shared Upstream 校验
+
+至少验证一组“相同 upstream”连接：
+
+- 两个客户端连接同一路 RTSP 上游
+- 查看 `/healthz`
+
+预期：
+
+- `bridge.activeUpstreamCount = 1`
+- `bridge.totalClientCount = 2`
+- `upstreams` 中只有一条该 upstream 记录
+- 对应 `clientCount = 2`
+
 ## 六、环境变量建议
 
 示例：
@@ -191,7 +206,26 @@ STREAM_SWEEP_INTERVAL_MS=10000
 - `STREAM_MAX_RESTARTS`：最大自动重启次数
 - `STREAM_SWEEP_INTERVAL_MS`：session 巡检周期
 
-## 七、常见问题排查
+## 七、运行态观察建议
+
+shared upstream 已启用后，建议通过 `/healthz` 重点观察：
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams[*].upstreamKey`
+- `upstreams[*].clientCount`
+- `upstreams[*].state`
+- `upstreams[*].restartCount`
+
+这组字段可用于判断：
+
+- 是否发生上游复用
+- 是否存在错误的重复 upstream
+- 是否存在 client 未释放
+- 恢复逻辑是否异常触发
+
+## 八、常见问题排查
 
 ### 1. Docker Hub 拉取基础镜像失败
 
@@ -241,7 +275,16 @@ STREAM_SWEEP_INTERVAL_MS=10000
 - 检查应用是否监听 `0.0.0.0:3000`
 - 检查宿主机端口占用
 
-### 5. RTSP 拉流失败
+### 5. shared upstream 未按预期复用
+
+排查方向：
+
+- 检查两个客户端连接的最终 RTSP 地址是否完全等价
+- 检查是否使用了不同的 `?url=`
+- 检查 `/healthz.upstreams` 中的 `upstreamKey`
+- 检查是否因 URL 差异导致生成多个 upstreamKey
+
+### 6. RTSP 拉流失败
 
 排查方向：
 
@@ -250,17 +293,16 @@ STREAM_SWEEP_INTERVAL_MS=10000
 - 检查容器网络与防火墙
 - 检查 FFmpeg 可执行路径配置是否正确
 
-## 八、当前限制
+## 九、当前限制
 
 当前部署文档只覆盖 Phase 1 基线。
 
 当前尚未实现：
 
-- shared upstream
 - 鉴权
 - 多协议输出
 - 管理后台
 - 前端播放器
 - Kubernetes
 
-后续如果实现以上能力，应再单独扩展部署文档。
+如果后续实现以上能力，应再单独扩展部署文档。

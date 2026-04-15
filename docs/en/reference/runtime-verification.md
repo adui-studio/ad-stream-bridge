@@ -1,6 +1,6 @@
 # Runtime Verification
 
-This document describes the minimum runtime verification flow for `rtsp-ws-bridge` in the current phase.
+This document describes the minimum runtime verification flow for `rtsp-ws-bridge` in the current Phase 1 scope.
 
 ## Verification Goals
 
@@ -10,9 +10,8 @@ Confirm that the following capabilities work as expected:
 - `/healthz` is reachable
 - `/ws-ping` is reachable
 - the `/live/:id` route is usable
+- shared upstream behavior can be observed and verified
 - the containerized startup flow works
-
----
 
 ## 1. Local Engineering Checks
 
@@ -75,8 +74,16 @@ curl http://localhost:3000/healthz
 
 Expected result:
 
-- returns 200
+- returns HTTP 200
 - includes current bridge runtime information
+- includes shared upstream runtime fields
+
+Focus on:
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams`
 
 ### 2. `/ws-ping`
 
@@ -125,7 +132,32 @@ Suggested validation points:
 - logs show the related session lifecycle
 - when the client disconnects, server-side cleanup completes correctly
 
-## 6. Exception Scenario Verification
+## 6. Shared Upstream Verification
+
+It is recommended to verify at least the following two scenarios.
+
+### Scenario A: same upstream is reused
+
+Connect two clients to the same RTSP upstream.
+
+Expected result:
+
+- `/healthz.bridge.activeUpstreamCount = 1`
+- `/healthz.bridge.totalClientCount = 2`
+- `/healthz.upstreams` contains only one upstream entry for that source
+- that upstream entry has `clientCount = 2`
+
+### Scenario B: different upstreams remain isolated
+
+Connect two clients to different RTSP upstreams.
+
+Expected result:
+
+- `/healthz.bridge.activeUpstreamCount >= 2`
+- `/healthz.upstreams` contains multiple upstream entries
+- each upstream entry has a `clientCount` that matches the actual client count
+
+## 7. Exception Scenario Verification
 
 It is recommended to manually verify at least the following scenarios:
 
@@ -135,7 +167,7 @@ It is recommended to manually verify at least the following scenarios:
 - no data is produced for a long time and recovery is triggered
 - service recovery after container restart
 
-## 7. Log Inspection Guidance
+## 8. Log Inspection Guidance
 
 Use the following command to inspect runtime behavior:
 
@@ -145,28 +177,29 @@ docker compose logs -f
 
 Focus on:
 
+- upstream creation
 - session creation
 - FFmpeg start
 - FFmpeg exit
 - restart / idle recovery
 - WebSocket disconnect cleanup
+- shared upstream client count changes
 
-## 8. Boundary Between Tests and Runtime Verification
+## 9. Boundary Between Tests and Runtime Verification
 
-Current automated tests are primarily designed to protect lifecycle semantics, not to replace real RTSP / FFmpeg environment validation.
+Current automated tests are primarily designed to protect lifecycle semantics and runtime logic boundaries, not to replace real RTSP / FFmpeg environment verification.
 
 In other words:
 
-- automated tests protect runtime logic boundaries
+- automated tests protect logic and lifecycle regressions
 - local validation with a real RTSP source confirms external dependency behavior
 
 Both are important, but they serve different purposes.
 
-## 9. Not in Scope Yet
+## 10. Not in Scope Yet
 
 The following capabilities are not implemented yet and should not be included in the current runtime verification baseline:
 
-- shared upstream
 - auth
 - multi-protocol output
 - admin console

@@ -10,6 +10,7 @@
 - `/healthz` 可访问
 - `/ws-ping` 可访问
 - `/live/:id` 路由可接入
+- shared upstream 可被观察与验证
 - 容器化启动流程可工作
 
 ## 一、本地工程校验
@@ -75,10 +76,16 @@ curl http://localhost:3000/healthz
 
 - 返回 200
 - 返回内容包含当前 bridge 运行状态
+- 返回内容包含 shared upstream 运行态字段
+
+重点关注：
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams`
 
 ### 2. `/ws-ping`
-
-可使用浏览器、WebSocket 客户端或当前项目已有调试方式验证：
 
 ```text
 ws://localhost:3000/ws-ping
@@ -123,7 +130,32 @@ RTSP_URL_TEMPLATE=rtsp://your-rtsp-host/live/{id}
 - 日志中可看到对应 session 生命周期信息
 - 客户端断开后，服务端能完成清理
 
-## 六、异常场景验证
+## 六、Shared Upstream 验证
+
+建议至少验证以下两种场景：
+
+### 场景 A：相同 upstream 复用
+
+使用两个客户端连接同一个 RTSP 上游。
+
+预期结果：
+
+- `/healthz.bridge.activeUpstreamCount = 1`
+- `/healthz.bridge.totalClientCount = 2`
+- `/healthz.upstreams` 中只有一条对应 upstream
+- 该 upstream 的 `clientCount = 2`
+
+### 场景 B：不同 upstream 隔离
+
+使用两个客户端连接不同的 RTSP 上游。
+
+预期结果：
+
+- `/healthz.bridge.activeUpstreamCount >= 2`
+- `/healthz.upstreams` 中存在多个 upstream 条目
+- 每个 upstream 的 `clientCount` 与实际连接数一致
+
+## 七、异常场景验证
 
 建议至少人工验证以下场景：
 
@@ -133,7 +165,7 @@ RTSP_URL_TEMPLATE=rtsp://your-rtsp-host/live/{id}
 - 长时间无数据输出后的恢复逻辑
 - 容器重启后的服务恢复
 
-## 七、日志观察建议
+## 八、日志观察建议
 
 建议结合以下命令观察运行状态：
 
@@ -143,13 +175,15 @@ docker compose logs -f
 
 重点关注：
 
+- upstream 创建
 - session 创建
 - FFmpeg 启动
 - FFmpeg 退出
 - restart / idle recovery
 - WebSocket 断开清理
+- shared upstream clientCount 变化
 
-## 八、测试与验证的边界
+## 九、测试与验证的边界
 
 当前测试更偏向“生命周期语义回归保护”，而不是“真实 RTSP / FFmpeg 外部环境验证”。
 
@@ -160,11 +194,10 @@ docker compose logs -f
 
 两者都重要，但职责不同，不应混为一体。
 
-## 九、当前不在验证范围内
+## 十、当前不在验证范围内
 
 以下能力当前尚未实现，不应写入当前验证基线：
 
-- shared upstream
 - 鉴权
 - 多协议输出
 - 管理后台

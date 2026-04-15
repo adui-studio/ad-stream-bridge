@@ -1,17 +1,18 @@
 # Deployment and Runtime
 
-This document describes how to run `ad-stream-bridge` locally, with Docker, and with Docker Compose during the current Phase 1 scope, along with basic troubleshooting guidance.
+This document describes how to run `ad-stream-bridge` locally, with Docker, and with Docker Compose in the current Phase 1 scope, along with baseline troubleshooting guidance.
 
 ## Scope
 
-This document currently applies only to:
+This document currently applies to:
 
 - app: `rtsp-ws-bridge`
 - flow: `RTSP Input -> WebSocket-FLV Output`
+- baseline shared upstream support
+- `/healthz` upstream runtime output
 
 The following are not implemented yet:
 
-- shared upstream
 - auth
 - admin console
 - multi-protocol bridges
@@ -159,6 +160,20 @@ curl http://localhost:3000/healthz
 docker compose logs --tail=200
 ```
 
+### 4. Shared Upstream Check
+
+Verify at least one “same upstream” case:
+
+- connect two clients to the same RTSP upstream
+- inspect `/healthz`
+
+Expected result:
+
+- `bridge.activeUpstreamCount = 1`
+- `bridge.totalClientCount = 2`
+- `upstreams` contains only one entry for that upstream
+- that entry has `clientCount = 2`
+
 ## 6. Environment Variable Notes
 
 Example:
@@ -186,12 +201,33 @@ STREAM_SWEEP_INTERVAL_MS=10000
 - `LOG_LEVEL`: log level
 - `RTSP_URL_TEMPLATE`: RTSP source template when `?url=` is not passed
 - `FFMPEG_PATH`: ffmpeg executable path
-- `STREAM_IDLE_TIMEOUT_MS`: idle/no-data threshold
+- `STREAM_IDLE_TIMEOUT_MS`: idle / no-data threshold
 - `STREAM_RESTART_DELAY_MS`: restart delay after unexpected exit
 - `STREAM_MAX_RESTARTS`: max automatic restart attempts
 - `STREAM_SWEEP_INTERVAL_MS`: session sweep interval
 
-## 7. Common Troubleshooting
+## 7. Runtime Inspection Guidance
+
+With shared upstream enabled, `/healthz` should be used as the primary runtime inspection endpoint.
+
+Focus on:
+
+- `bridge.activeSessionCount`
+- `bridge.activeUpstreamCount`
+- `bridge.totalClientCount`
+- `upstreams[*].upstreamKey`
+- `upstreams[*].clientCount`
+- `upstreams[*].state`
+- `upstreams[*].restartCount`
+
+These fields help answer:
+
+- whether upstream reuse is actually happening
+- whether duplicated upstream sessions were created unexpectedly
+- whether clients were not cleaned up correctly
+- whether restart or idle recovery is firing unexpectedly
+
+## 8. Common Troubleshooting
 
 ### 1. Docker Hub base image pull failure
 
@@ -241,7 +277,16 @@ Recommended checks:
 - verify the app binds to `0.0.0.0:3000`
 - check for host port conflicts
 
-### 5. RTSP pull fails
+### 5. Shared upstream is not reused as expected
+
+Recommended checks:
+
+- verify that both clients resolve to the same final RTSP upstream URL
+- verify whether different `?url=` values were used
+- inspect `/healthz.upstreams[*].upstreamKey`
+- verify whether URL differences caused multiple upstream keys
+
+### 6. RTSP pull fails
 
 Recommended checks:
 
@@ -250,13 +295,12 @@ Recommended checks:
 - verify container networking and firewall rules
 - verify `FFMPEG_PATH` is correct
 
-## 8. Current Limitations
+## 9. Current Limitations
 
 This deployment document only covers the current Phase 1 baseline.
 
 The following are not implemented yet:
 
-- shared upstream
 - auth
 - multi-protocol output
 - admin console
