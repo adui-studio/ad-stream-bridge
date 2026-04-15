@@ -1,21 +1,15 @@
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
+
 import { env } from '../../config/env.js';
-import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
-import { resolveUpstreamDescriptor } from './upstream-key.js';
+import type { FfmpegSessionSnapshot } from './ffmpeg-session.js';
+import { UpstreamRegistry } from './upstream-registry.js';
 
 export interface AttachClientInput {
   streamId: string;
   ws: WebSocket;
   clientIp: string;
   rtspUrl?: string;
-}
-
-interface ManagedSession {
-  session: FfmpegSession;
-  rtspUrl: string;
-  upstreamKey: string;
-  createdAt: number;
 }
 
 const DEFAULT_RTSP_URL_TEMPLATE = env.rtspUrlTemplate;
@@ -26,37 +20,50 @@ function normalizeNumber(raw: number | undefined, fallback: number): number {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
     return raw;
   }
-
   return fallback;
 }
 
 export class StreamManager {
-  private readonly sessions = new Map<string, ManagedSession>();
+  private readonly upstreamRegistry: UpstreamRegistry;
   private readonly idleTimeoutMs: number;
   private readonly sweepIntervalMs: number;
   private sweepTimer: NodeJS.Timeout | null = null;
   private lastSweepAt: number | null = null;
 
-  constructor(options?: { idleTimeoutMs?: number; sweepIntervalMs?: number }) {
+  constructor(options?: {
+    idleTimeoutMs?: number;
+    sweepIntervalMs?: number;
+    upstreamRegistry?: UpstreamRegistry;
+  }) {
     this.idleTimeoutMs = normalizeNumber(options?.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS);
     this.sweepIntervalMs = normalizeNumber(options?.sweepIntervalMs, DEFAULT_SWEEP_INTERVAL_MS);
+    this.upstreamRegistry =
+      options?.upstreamRegistry ??
+      new UpstreamRegistry({
+        rtspUrlTemplate: DEFAULT_RTSP_URL_TEMPLATE
+      });
   }
 
   attachClient(input: AttachClientInput): void {
     const { streamId, ws, clientIp, rtspUrl } = input;
 
-    const managedSession = this.getOrCreateSession(streamId, rtspUrl);
-    const snapshotBeforeAttach = managedSession.session.getSnapshot();
+    const managedUpstream = this.upstreamRegistry.getOrCreate({
+      streamId,
+      rtspUrl
+    });
 
-    managedSession.session.attachClient({
+    const snapshotBeforeAttach = managedUpstream.session.getSnapshot();
+
+    managedUpstream.session.attachClient({
       ws,
       clientIp
     });
 
-    const snapshotAfterAttach = managedSession.session.getSnapshot();
+    const snapshotAfterAttach = managedUpstream.session.getSnapshot();
 
     logger.info('stream websocket client connected', {
       streamId,
+      upstreamKey: managedUpstream.upstreamKey,
       sessionId: snapshotAfterAttach.sessionId,
       pid: snapshotAfterAttach.pid,
       reason: 'ws_connect',
@@ -65,7 +72,7 @@ export class StreamManager {
     });
 
     if (snapshotBeforeAttach.clientCount === 0) {
-      managedSession.session.start();
+      managedUpstream.session.start();
     }
 
     this.ensureSweepStarted();
@@ -75,16 +82,18 @@ export class StreamManager {
         JSON.stringify({
           ok: true,
           streamId,
+          upstreamKey: managedUpstream.upstreamKey,
           message: 'live websocket connected',
           rtspUrlSource: rtspUrl ? 'query' : DEFAULT_RTSP_URL_TEMPLATE ? 'template' : 'unknown',
           timestamp: new Date().toISOString()
         })
       );
     } catch (error) {
-      const snapshot = managedSession.session.getSnapshot();
+      const snapshot = managedUpstream.session.getSnapshot();
 
       logger.error('stream websocket initial response failed', {
         streamId,
+        upstreamKey: managedUpstream.upstreamKey,
         sessionId: snapshot.sessionId,
         pid: snapshot.pid,
         reason: 'ws_init_send_failed',
@@ -92,14 +101,17 @@ export class StreamManager {
         error
       });
 
-      managedSession.session.detachClient(ws, 'initial message send failed');
-      this.cleanupSessionIfIdle(streamId, 'initial_send_failed');
+      managedUpstream.session.detachClient(ws, 'initial message send failed');
+      this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, 'initial_send_failed');
+      this.maybeStopSweep();
+
       throw error;
     }
 
     const cleanupForSocket = (reason: string) => {
-      managedSession.session.detachClient(ws, reason);
-      this.cleanupSessionIfIdle(streamId, reason);
+      managedUpstream.session.detachClient(ws, reason);
+      this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, reason);
+      this.maybeStopSweep();
     };
 
     ws.on('close', (code, reason) => {
@@ -107,10 +119,11 @@ export class StreamManager {
     });
 
     ws.on('error', (error) => {
-      const snapshot = managedSession.session.getSnapshot();
+      const snapshot = managedUpstream.session.getSnapshot();
 
       logger.error('stream websocket client error', {
         streamId,
+        upstreamKey: managedUpstream.upstreamKey,
         sessionId: snapshot.sessionId,
         pid: snapshot.pid,
         reason: 'ws_error',
@@ -123,10 +136,12 @@ export class StreamManager {
 
     ws.on('message', (message) => {
       const payload = Buffer.isBuffer(message) ? message.toString('utf8') : String(message);
-      const snapshot = managedSession.session.getSnapshot();
+
+      const snapshot = managedUpstream.session.getSnapshot();
 
       logger.info('stream websocket client message received', {
         streamId,
+        upstreamKey: managedUpstream.upstreamKey,
         sessionId: snapshot.sessionId,
         pid: snapshot.pid,
         reason: 'ws_message',
@@ -138,6 +153,7 @@ export class StreamManager {
         JSON.stringify({
           ok: true,
           streamId,
+          upstreamKey: managedUpstream.upstreamKey,
           message: 'live route does not accept upstream control messages yet',
           timestamp: new Date().toISOString()
         })
@@ -146,104 +162,33 @@ export class StreamManager {
   }
 
   getActiveSessionCount(): number {
-    return this.sessions.size;
+    return this.upstreamRegistry.getActiveUpstreamCount();
   }
 
   getSessionSnapshot(streamId: string): FfmpegSessionSnapshot | null {
-    return this.sessions.get(streamId)?.session.getSnapshot() ?? null;
+    return this.upstreamRegistry.getSessionSnapshotByStreamId(streamId);
   }
 
   getAllSessionSnapshots(): FfmpegSessionSnapshot[] {
-    return Array.from(this.sessions.values()).map(({ session }) => session.getSnapshot());
+    return this.upstreamRegistry.list().map((upstream) => upstream.session.getSnapshot());
   }
 
   getRuntimeStats(): {
     activeSessionCount: number;
+    activeUpstreamCount: number;
     idleTimeoutMs: number;
     sweepIntervalMs: number;
     lastSweepAt: number | null;
   } {
+    const activeUpstreamCount = this.upstreamRegistry.getActiveUpstreamCount();
+
     return {
-      activeSessionCount: this.sessions.size,
+      activeSessionCount: activeUpstreamCount,
+      activeUpstreamCount,
       idleTimeoutMs: this.idleTimeoutMs,
       sweepIntervalMs: this.sweepIntervalMs,
       lastSweepAt: this.lastSweepAt
     };
-  }
-
-  private getOrCreateSession(streamId: string, rtspUrl?: string): ManagedSession {
-    const existing = this.sessions.get(streamId);
-    if (existing) {
-      return existing;
-    }
-
-    const upstream = resolveUpstreamDescriptor({
-      streamId,
-      directRtspUrl: rtspUrl,
-      rtspUrlTemplate: DEFAULT_RTSP_URL_TEMPLATE
-    });
-
-    const session = new FfmpegSession({
-      streamId,
-      rtspUrl: upstream.resolvedRtspUrl
-    });
-
-    const managedSession: ManagedSession = {
-      session,
-      rtspUrl: upstream.resolvedRtspUrl,
-      upstreamKey: upstream.upstreamKey,
-      createdAt: Date.now()
-    };
-
-    this.sessions.set(streamId, managedSession);
-
-    logger.info('stream session created', {
-      streamId,
-      upstreamKey: upstream.upstreamKey,
-      sessionId: session.getSnapshot().sessionId,
-      pid: null,
-      reason: 'session_create',
-      rtspUrl: upstream.resolvedRtspUrl
-    });
-
-    return managedSession;
-  }
-
-  private cleanupSessionIfIdle(streamId: string, triggerReason = 'idle_cleanup'): void {
-    const managedSession = this.sessions.get(streamId);
-
-    if (!managedSession) {
-      return;
-    }
-
-    const snapshot = managedSession.session.getSnapshot();
-
-    if (snapshot.clientCount > 0) {
-      logger.debug?.('stream session cleanup skipped: clients still attached', {
-        streamId,
-        sessionId: snapshot.sessionId,
-        pid: snapshot.pid,
-        reason: triggerReason,
-        clientCount: snapshot.clientCount,
-        state: snapshot.state
-      });
-      return;
-    }
-
-    managedSession.session.stop('no websocket clients remain');
-    this.sessions.delete(streamId);
-
-    logger.info('stream session destroyed', {
-      streamId,
-      upstreamKey: managedSession.upstreamKey,
-      sessionId: snapshot.sessionId,
-      pid: snapshot.pid,
-      reason: triggerReason,
-      rtspUrl: managedSession.rtspUrl,
-      createdAt: managedSession.createdAt
-    });
-
-    this.maybeStopSweep();
   }
 
   private ensureSweepStarted(): void {
@@ -257,6 +202,7 @@ export class StreamManager {
 
     logger.info('stream manager started idle sweep loop', {
       streamId: null,
+      upstreamKey: null,
       sessionId: null,
       pid: null,
       reason: 'sweep_loop_start',
@@ -266,7 +212,7 @@ export class StreamManager {
   }
 
   private maybeStopSweep(): void {
-    if (this.sessions.size > 0 || !this.sweepTimer) {
+    if (this.upstreamRegistry.getActiveUpstreamCount() > 0 || !this.sweepTimer) {
       return;
     }
 
@@ -275,6 +221,7 @@ export class StreamManager {
 
     logger.info('stream manager stopped idle sweep loop', {
       streamId: null,
+      upstreamKey: null,
       sessionId: null,
       pid: null,
       reason: 'sweep_loop_stop'
@@ -284,11 +231,11 @@ export class StreamManager {
   private runSweep(): void {
     this.lastSweepAt = Date.now();
 
-    for (const [streamId, managedSession] of this.sessions.entries()) {
-      const snapshot = managedSession.session.getSnapshot();
+    for (const managedUpstream of this.upstreamRegistry.list()) {
+      const snapshot = managedUpstream.session.getSnapshot();
 
       if (snapshot.clientCount === 0) {
-        this.cleanupSessionIfIdle(streamId, 'sweep_no_clients');
+        this.upstreamRegistry.releaseIfUnused(managedUpstream.upstreamKey, 'sweep_no_clients');
         continue;
       }
 
@@ -297,19 +244,18 @@ export class StreamManager {
       }
 
       const referenceTime = snapshot.lastDataAt ?? snapshot.lastStartedAt;
-
       if (!referenceTime) {
         continue;
       }
 
       const idleForMs = Date.now() - referenceTime;
-
       if (idleForMs < this.idleTimeoutMs) {
         continue;
       }
 
       logger.warn('stream session idle recovery triggered', {
-        streamId,
+        streamId: managedUpstream.streamId,
+        upstreamKey: managedUpstream.upstreamKey,
         sessionId: snapshot.sessionId,
         pid: snapshot.pid,
         reason: 'idle_timeout',
@@ -321,8 +267,10 @@ export class StreamManager {
         clientCount: snapshot.clientCount
       });
 
-      managedSession.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
+      managedUpstream.session.restart(`idle timeout exceeded (${idleForMs}ms)`);
     }
+
+    this.maybeStopSweep();
   }
 }
 
