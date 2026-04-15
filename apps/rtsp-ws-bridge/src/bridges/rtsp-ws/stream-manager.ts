@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
 import { env } from '../../config/env.js';
 import { FfmpegSession, type FfmpegSessionSnapshot } from './ffmpeg-session.js';
-import { resolveRtspUrl } from './resolve-rtsp-url.js';
+import { resolveUpstreamDescriptor } from './upstream-key.js';
 
 export interface AttachClientInput {
   streamId: string;
@@ -14,6 +14,7 @@ export interface AttachClientInput {
 interface ManagedSession {
   session: FfmpegSession;
   rtspUrl: string;
+  upstreamKey: string;
   createdAt: number;
 }
 
@@ -172,24 +173,25 @@ export class StreamManager {
 
   private getOrCreateSession(streamId: string, rtspUrl?: string): ManagedSession {
     const existing = this.sessions.get(streamId);
-
     if (existing) {
       return existing;
     }
 
-    const resolvedRtspUrl = resolveRtspUrl(streamId, {
+    const upstream = resolveUpstreamDescriptor({
+      streamId,
       directRtspUrl: rtspUrl,
       rtspUrlTemplate: DEFAULT_RTSP_URL_TEMPLATE
     });
 
     const session = new FfmpegSession({
       streamId,
-      rtspUrl: resolvedRtspUrl
+      rtspUrl: upstream.resolvedRtspUrl
     });
 
     const managedSession: ManagedSession = {
       session,
-      rtspUrl: resolvedRtspUrl,
+      rtspUrl: upstream.resolvedRtspUrl,
+      upstreamKey: upstream.upstreamKey,
       createdAt: Date.now()
     };
 
@@ -197,10 +199,11 @@ export class StreamManager {
 
     logger.info('stream session created', {
       streamId,
+      upstreamKey: upstream.upstreamKey,
       sessionId: session.getSnapshot().sessionId,
       pid: null,
       reason: 'session_create',
-      rtspUrl: resolvedRtspUrl
+      rtspUrl: upstream.resolvedRtspUrl
     });
 
     return managedSession;
@@ -232,6 +235,7 @@ export class StreamManager {
 
     logger.info('stream session destroyed', {
       streamId,
+      upstreamKey: managedSession.upstreamKey,
       sessionId: snapshot.sessionId,
       pid: snapshot.pid,
       reason: triggerReason,
