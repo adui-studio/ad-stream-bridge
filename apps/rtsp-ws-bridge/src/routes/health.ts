@@ -2,10 +2,30 @@ import type { Application, Request, Response } from 'express';
 import { env } from '../config/env.js';
 import { streamManager } from '../bridges/rtsp-ws/stream-manager.js';
 
-export function registerHealthRoutes(app: Application): void {
+export interface HealthRouteStreamManagerLike {
+  getAllSessionSnapshots(): unknown[];
+  getRuntimeStats(): {
+    activeSessionCount: number;
+    activeUpstreamCount: number;
+    totalClientCount: number;
+    idleTimeoutMs: number;
+    sweepIntervalMs: number;
+    lastSweepAt: number | null;
+    upstreams: unknown[];
+  };
+}
+
+export function registerHealthRoutes(
+  app: Application,
+  options?: {
+    streamManager?: HealthRouteStreamManagerLike;
+  }
+): void {
+  const manager = options?.streamManager ?? streamManager;
+
   app.get('/healthz', (_req: Request, res: Response) => {
-    const sessions = streamManager.getAllSessionSnapshots();
-    const runtime = streamManager.getRuntimeStats();
+    const sessions = manager.getAllSessionSnapshots();
+    const runtime = manager.getRuntimeStats();
 
     res.status(200).json({
       ok: true,

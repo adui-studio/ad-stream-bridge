@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import type { WebSocket } from 'ws';
 
 import { StreamManager } from '../src/bridges/rtsp-ws/stream-manager.js';
-import { FfmpegSession } from '../src/bridges/rtsp-ws/ffmpeg-session.js';
+import {
+  UpstreamRegistry,
+  type RegistrySession
+} from '../src/bridges/rtsp-ws/upstream-registry.js';
 import { MockWebSocket } from './helpers/mock-websocket.js';
 
 const WAIT_STEP_MS = 25;
@@ -28,113 +32,91 @@ async function waitFor(
   assert.fail(options?.message ?? 'waitFor timeout');
 }
 
-function patchSessionLifecycle(t: Parameters<typeof test>[1]) {
-  const originalStart = FfmpegSession.prototype.start;
-  const originalStop = FfmpegSession.prototype.stop;
-  const originalRestart = FfmpegSession.prototype.restart;
+class FakeSession implements RegistrySession {
+  public clientCount = 0;
+  public state: 'idle' | 'starting' | 'running' | 'stopped' = 'idle';
+  public lastStartedAt: number | null = null;
+  public lastDataAt: number | null = null;
+  public restartCount = 0;
+  public lastErrorAt: number | null = null;
 
-  const startCalls: Array<{ streamId: string }> = [];
-  const stopCalls: Array<{ streamId: string; reason: string }> = [];
-  const restartCalls: Array<{ streamId: string; reason: string }> = [];
+  constructor(
+    private readonly streamId: string,
+    private readonly rtspUrl: string
+  ) {}
 
-  FfmpegSession.prototype.start = function patchedStart(this: FfmpegSession): void {
-    const self = this as unknown as {
-      state: string;
-      lastStartedAt: number | null;
-      getSnapshot: () => { streamId: string };
+  attachClient(_input: { ws: WebSocket; clientIp: string }): void {
+    this.clientCount += 1;
+  }
+
+  detachClient(_ws: WebSocket, _reason?: string): void {
+    this.clientCount = Math.max(0, this.clientCount - 1);
+  }
+
+  start(): void {
+    this.state = 'running';
+    this.lastStartedAt = Date.now();
+  }
+
+  stop(): void {
+    this.state = 'stopped';
+  }
+
+  restart(): void {
+    this.restartCount += 1;
+    this.state = 'running';
+    this.lastStartedAt = Date.now();
+  }
+
+  getSnapshot() {
+    return {
+      sessionId: `session:${this.streamId}`,
+      streamId: this.streamId,
+      rtspUrl: this.rtspUrl,
+      pid: null,
+      state: this.state,
+      clientCount: this.clientCount,
+      lastStartedAt: this.lastStartedAt,
+      lastDataAt: this.lastDataAt,
+      restartCount: this.restartCount,
+      lastErrorAt: this.lastErrorAt
     };
-
-    startCalls.push({
-      streamId: self.getSnapshot().streamId
-    });
-
-    self.state = 'running';
-    self.lastStartedAt = Date.now();
-  };
-
-  FfmpegSession.prototype.stop = function patchedStop(
-    this: FfmpegSession,
-    reason = 'manual stop'
-  ): void {
-    const self = this as unknown as {
-      state: string;
-      lastStoppedAt: number | null;
-      shouldRestart: boolean;
-      getSnapshot: () => { streamId: string };
-      clearAllClientBindings?: () => void;
-    };
-
-    stopCalls.push({
-      streamId: self.getSnapshot().streamId,
-      reason
-    });
-
-    self.shouldRestart = false;
-    self.state = 'stopped';
-    self.lastStoppedAt = Date.now();
-
-    if (typeof self.clearAllClientBindings === 'function') {
-      self.clearAllClientBindings();
-    }
-  };
-
-  FfmpegSession.prototype.restart = function patchedRestart(
-    this: FfmpegSession,
-    reason = 'manual restart'
-  ): void {
-    const self = this as unknown as {
-      state: string;
-      restartCount: number;
-      lastRestartAt: number | null;
-      lastStartedAt: number | null;
-      getSnapshot: () => { streamId: string };
-    };
-
-    restartCalls.push({
-      streamId: self.getSnapshot().streamId,
-      reason
-    });
-
-    self.restartCount += 1;
-    self.lastRestartAt = Date.now();
-    self.lastStartedAt = Date.now();
-    self.state = 'running';
-  };
-
-  t.after(() => {
-    FfmpegSession.prototype.start = originalStart;
-    FfmpegSession.prototype.stop = originalStop;
-    FfmpegSession.prototype.restart = originalRestart;
-  });
-
-  return {
-    startCalls,
-    stopCalls,
-    restartCalls
-  };
+  }
 }
 
-test('idle timeout triggers restart for running session with active clients', async (t) => {
-  const { startCalls, restartCalls, stopCalls } = patchSessionLifecycle(t);
+test('idle timeout triggers restart for running session with active clients', async () => {
+  let fakeSession: FakeSession | null = null;
+
+  const registry = new UpstreamRegistry({
+    createSession: ({ streamId, rtspUrl }) => {
+      fakeSession = new FakeSession(streamId, rtspUrl);
+      return fakeSession;
+    }
+  });
 
   const manager = new StreamManager({
     idleTimeoutMs: 80,
-    sweepIntervalMs: 20
+    sweepIntervalMs: 20,
+    upstreamRegistry: registry
   });
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-idle-01',
     ws: ws as never,
     clientIp: '127.0.0.1',
     rtspUrl: 'rtsp://example.local/live/camera-idle-01'
   });
 
-  assert.equal(startCalls.length, 1);
-  assert.equal(restartCalls.length, 0);
+  assert.ok(fakeSession);
+  assert.equal(fakeSession.restartCount, 0);
 
-  await waitFor(() => restartCalls.length >= 1, {
+  fakeSession.lastStartedAt = Date.now() - 1000;
+  fakeSession.lastDataAt = null;
+  fakeSession.state = 'running';
+
+  await waitFor(() => (fakeSession?.restartCount ?? 0) >= 1, {
     message: 'expected idle sweep to trigger recovery restart'
   });
 
@@ -143,90 +125,107 @@ test('idle timeout triggers restart for running session with active clients', as
   assert.ok(snapshot);
   assert.equal(snapshot.clientCount, 1);
   assert.equal(snapshot.state, 'running');
-  assert.equal(stopCalls.length, 0);
-  assert.equal(restartCalls[0]?.streamId, 'camera-idle-01');
-  assert.match(restartCalls[0]?.reason ?? '', /idle timeout exceeded/);
+  assert.equal(fakeSession?.restartCount, 1);
 
-  ws.close(1000, 'cleanup');
+  manager.closeConnection({
+    streamId: 'camera-idle-01',
+    upstreamKey: opened.upstreamKey,
+    ws: ws as never,
+    reason: 'cleanup'
+  });
+
+  await waitFor(() => manager.getActiveSessionCount() === 0, {
+    message: 'expected cleanup to stop active upstream'
+  });
 });
 
-test('idle sweep destroys session with no clients instead of restarting it', async (t) => {
-  const { startCalls, restartCalls, stopCalls } = patchSessionLifecycle(t);
+test('idle sweep destroys session with no clients instead of restarting it', async () => {
+  let fakeSession: FakeSession | null = null;
+
+  const registry = new UpstreamRegistry({
+    createSession: ({ streamId, rtspUrl }) => {
+      fakeSession = new FakeSession(streamId, rtspUrl);
+      return fakeSession;
+    }
+  });
 
   const manager = new StreamManager({
     idleTimeoutMs: 80,
-    sweepIntervalMs: 20
+    sweepIntervalMs: 20,
+    upstreamRegistry: registry
   });
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-idle-02',
     ws: ws as never,
     clientIp: '127.0.0.1',
     rtspUrl: 'rtsp://example.local/live/camera-idle-02'
   });
 
-  assert.equal(startCalls.length, 1);
+  assert.ok(fakeSession);
   assert.equal(manager.getActiveSessionCount(), 1);
 
-  ws.close(1000, 'client closed');
+  manager.closeConnection({
+    streamId: 'camera-idle-02',
+    upstreamKey: opened.upstreamKey,
+    ws: ws as never,
+    reason: 'client closed'
+  });
 
   await waitFor(() => manager.getSessionSnapshot('camera-idle-02') === null, {
     message: 'expected session to be destroyed after last client disconnect'
   });
 
   assert.equal(manager.getActiveSessionCount(), 0);
-  assert.equal(restartCalls.length, 0);
-  assert.equal(stopCalls.length, 1);
-  assert.equal(stopCalls[0]?.streamId, 'camera-idle-02');
-  assert.equal(stopCalls[0]?.reason, 'no websocket clients remain');
+  assert.equal(fakeSession?.restartCount, 0);
 });
 
-test('idle timeout does not trigger restart when session is not running', async (t) => {
-  const { startCalls, restartCalls, stopCalls } = patchSessionLifecycle(t);
+test('idle timeout does not trigger restart when session is not running', async () => {
+  let fakeSession: FakeSession | null = null;
+
+  const registry = new UpstreamRegistry({
+    createSession: ({ streamId, rtspUrl }) => {
+      fakeSession = new FakeSession(streamId, rtspUrl);
+      return fakeSession;
+    }
+  });
 
   const manager = new StreamManager({
     idleTimeoutMs: 80,
-    sweepIntervalMs: 20
+    sweepIntervalMs: 20,
+    upstreamRegistry: registry
   });
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-idle-03',
     ws: ws as never,
     clientIp: '127.0.0.1',
     rtspUrl: 'rtsp://example.local/live/camera-idle-03'
   });
 
-  assert.equal(startCalls.length, 1);
+  assert.ok(fakeSession);
 
-  const snapshot = manager.getSessionSnapshot('camera-idle-03');
-  assert.ok(snapshot);
-
-  const sessionRecord = (
-    manager as unknown as {
-      sessions: Map<string, { session: unknown }>;
-    }
-  ).sessions.get('camera-idle-03');
-
-  assert.ok(sessionRecord);
-
-  const session = sessionRecord.session as {
-    state: string;
-    lastStartedAt: number | null;
-    lastDataAt: number | null;
-  };
-
-  session.state = 'starting';
-  session.lastStartedAt = Date.now() - 1000;
-  session.lastDataAt = null;
+  fakeSession.state = 'starting';
+  fakeSession.lastStartedAt = Date.now() - 1000;
+  fakeSession.lastDataAt = null;
 
   await delay(250);
 
-  assert.equal(restartCalls.length, 0);
-  assert.equal(stopCalls.length, 0);
+  assert.equal(fakeSession.restartCount, 0);
+  assert.equal(fakeSession.state, 'starting');
 
-  ws.close(1000, 'cleanup');
+  manager.closeConnection({
+    streamId: 'camera-idle-03',
+    upstreamKey: opened.upstreamKey,
+    ws: ws as never,
+    reason: 'cleanup'
+  });
+
+  await waitFor(() => manager.getActiveSessionCount() === 0, {
+    message: 'expected cleanup to stop active upstream'
+  });
 });

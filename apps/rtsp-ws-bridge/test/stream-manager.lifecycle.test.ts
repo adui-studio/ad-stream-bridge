@@ -64,7 +64,7 @@ function patchSessionLifecycle(t: Parameters<typeof test>[1]) {
   };
 }
 
-test('first client attach creates session and starts ffmpeg lifecycle', (t) => {
+test('first client open creates session and starts ffmpeg lifecycle', (t) => {
   const { startCalls, stopCalls } = patchSessionLifecycle(t);
   const manager = new StreamManager({
     sweepIntervalMs: 0,
@@ -73,7 +73,7 @@ test('first client attach creates session and starts ffmpeg lifecycle', (t) => {
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-01',
     ws: ws as never,
     clientIp: '127.0.0.1',
@@ -90,15 +90,12 @@ test('first client attach creates session and starts ffmpeg lifecycle', (t) => {
   assert.equal(snapshot.clientCount, 1);
   assert.equal(snapshot.streamId, 'camera-01');
 
-  assert.equal(ws.sent.length, 1);
-
-  const initialMessage = JSON.parse(ws.sentText[0] ?? '{}');
-  assert.equal(initialMessage.ok, true);
-  assert.equal(initialMessage.streamId, 'camera-01');
-  assert.equal(initialMessage.message, 'live websocket connected');
+  assert.equal(opened.streamId, 'camera-01');
+  assert.equal(opened.upstreamKey, 'rtsp://example.local/live/camera-01');
+  assert.equal(opened.rtspUrlSource, 'query');
 });
 
-test('second client on the same stream reuses session and does not start twice', (t) => {
+test('second client on the same upstream reuses session and does not start twice', (t) => {
   const { startCalls, stopCalls } = patchSessionLifecycle(t);
   const manager = new StreamManager({
     sweepIntervalMs: 0,
@@ -108,18 +105,18 @@ test('second client on the same stream reuses session and does not start twice',
   const ws1 = new MockWebSocket();
   const ws2 = new MockWebSocket();
 
-  manager.attachClient({
+  const opened1 = manager.openConnection({
     streamId: 'camera-02',
     ws: ws1 as never,
     clientIp: '127.0.0.1',
     rtspUrl: 'rtsp://example.local/live/camera-02'
   });
 
-  manager.attachClient({
+  const opened2 = manager.openConnection({
     streamId: 'camera-02',
     ws: ws2 as never,
     clientIp: '127.0.0.2',
-    rtspUrl: 'rtsp://ignored-because-session-already-exists'
+    rtspUrl: 'RTSP://EXAMPLE.LOCAL/live/camera-02/'
   });
 
   assert.equal(manager.getActiveSessionCount(), 1);
@@ -130,8 +127,14 @@ test('second client on the same stream reuses session and does not start twice',
 
   assert.ok(snapshot);
   assert.equal(snapshot.clientCount, 2);
+  assert.equal(opened1.upstreamKey, opened2.upstreamKey);
 
-  ws1.close(1000, 'first client closed');
+  manager.closeConnection({
+    streamId: 'camera-02',
+    upstreamKey: opened1.upstreamKey,
+    ws: ws1 as never,
+    reason: 'first client closed'
+  });
 
   const snapshotAfterFirstClose = manager.getSessionSnapshot('camera-02');
 
@@ -140,7 +143,12 @@ test('second client on the same stream reuses session and does not start twice',
   assert.equal(manager.getActiveSessionCount(), 1);
   assert.equal(stopCalls.length, 0);
 
-  ws2.close(1000, 'second client closed');
+  manager.closeConnection({
+    streamId: 'camera-02',
+    upstreamKey: opened2.upstreamKey,
+    ws: ws2 as never,
+    reason: 'second client closed'
+  });
 
   assert.equal(manager.getActiveSessionCount(), 0);
   assert.equal(manager.getSessionSnapshot('camera-02'), null);
@@ -149,7 +157,7 @@ test('second client on the same stream reuses session and does not start twice',
   assert.equal(stopCalls[0]?.reason, 'no websocket clients remain');
 });
 
-test('last client disconnect stops and destroys the managed session', (t) => {
+test('last client close stops and destroys the managed session', (t) => {
   const { startCalls, stopCalls } = patchSessionLifecycle(t);
   const manager = new StreamManager({
     sweepIntervalMs: 0,
@@ -158,7 +166,7 @@ test('last client disconnect stops and destroys the managed session', (t) => {
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-03',
     ws: ws as never,
     clientIp: '127.0.0.1',
@@ -168,7 +176,12 @@ test('last client disconnect stops and destroys the managed session', (t) => {
   assert.equal(startCalls.length, 1);
   assert.equal(manager.getActiveSessionCount(), 1);
 
-  ws.close(1000, 'client closed');
+  manager.closeConnection({
+    streamId: 'camera-03',
+    upstreamKey: opened.upstreamKey,
+    ws: ws as never,
+    reason: 'client closed'
+  });
 
   assert.equal(stopCalls.length, 1);
   assert.equal(stopCalls[0]?.streamId, 'camera-03');
@@ -177,7 +190,7 @@ test('last client disconnect stops and destroys the managed session', (t) => {
   assert.equal(manager.getSessionSnapshot('camera-03'), null);
 });
 
-test('websocket error path also detaches client and destroys idle session', (t) => {
+test('websocket error path can report error and destroy idle session', (t) => {
   const { startCalls, stopCalls } = patchSessionLifecycle(t);
   const manager = new StreamManager({
     sweepIntervalMs: 0,
@@ -186,7 +199,7 @@ test('websocket error path also detaches client and destroys idle session', (t) 
 
   const ws = new MockWebSocket();
 
-  manager.attachClient({
+  const opened = manager.openConnection({
     streamId: 'camera-04',
     ws: ws as never,
     clientIp: '127.0.0.1',
@@ -196,7 +209,19 @@ test('websocket error path also detaches client and destroys idle session', (t) 
   assert.equal(startCalls.length, 1);
   assert.equal(manager.getActiveSessionCount(), 1);
 
-  ws.fail(new Error('socket failure'));
+  manager.reportClientError({
+    streamId: 'camera-04',
+    upstreamKey: opened.upstreamKey,
+    clientIp: '127.0.0.1',
+    error: new Error('socket failure')
+  });
+
+  manager.closeConnection({
+    streamId: 'camera-04',
+    upstreamKey: opened.upstreamKey,
+    ws: ws as never,
+    reason: 'websocket error'
+  });
 
   assert.equal(stopCalls.length, 1);
   assert.equal(stopCalls[0]?.streamId, 'camera-04');

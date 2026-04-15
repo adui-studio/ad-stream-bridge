@@ -15,6 +15,9 @@ class FakeSession implements RegistrySession {
   private readonly sessionId: string;
   private readonly streamId: string;
   private readonly rtspUrl: string;
+  private lastStartedAt: number | null = null;
+  private lastDataAt: number | null = null;
+  private lastErrorAt: number | null = null;
 
   public startCalls = 0;
   public stopCalls = 0;
@@ -37,6 +40,7 @@ class FakeSession implements RegistrySession {
   start(): void {
     this.startCalls += 1;
     this.state = 'running';
+    this.lastStartedAt = Date.now();
   }
 
   stop(): void {
@@ -47,6 +51,7 @@ class FakeSession implements RegistrySession {
   restart(): void {
     this.restartCalls += 1;
     this.state = 'running';
+    this.lastStartedAt = Date.now();
   }
 
   getSnapshot() {
@@ -57,14 +62,10 @@ class FakeSession implements RegistrySession {
       pid: null,
       state: this.state,
       clientCount: this.clientCount,
-      startedAt: null,
-      stoppedAt: null,
-      lastStartedAt: null,
-      lastDataAt: null,
+      lastStartedAt: this.lastStartedAt,
+      lastDataAt: this.lastDataAt,
       restartCount: this.restartCalls,
-      exitCode: null,
-      exitSignal: null,
-      lastError: null
+      lastErrorAt: this.lastErrorAt
     };
   }
 }
@@ -172,7 +173,7 @@ test('releaseIfUnused destroys upstream when no clients remain', () => {
   });
 
   upstream.session.attachClient({
-    ws: {},
+    ws: {} as WebSocket,
     clientIp: '127.0.0.1'
   });
 
@@ -181,28 +182,6 @@ test('releaseIfUnused destroys upstream when no clients remain', () => {
 
   assert.equal(registry.getActiveUpstreamCount(), 0);
   assert.equal(registry.get(upstream.upstreamKey), null);
-});
-
-test('getSessionSnapshotByStreamId returns snapshot of active upstream', () => {
-  const registry = new UpstreamRegistry({
-    createSession: ({ streamId, rtspUrl }) =>
-      new FakeSession({
-        streamId,
-        rtspUrl,
-        sessionId: 'session-1'
-      })
-  });
-
-  registry.getOrCreate({
-    streamId: 'camera-01',
-    rtspUrl: 'rtsp://example.local/live/camera-01'
-  });
-
-  const snapshot = registry.getSessionSnapshotByStreamId('camera-01');
-
-  assert.ok(snapshot);
-  assert.equal(snapshot?.streamId, 'camera-01');
-  assert.equal(snapshot?.rtspUrl, 'rtsp://example.local/live/camera-01');
 });
 
 test('getRuntimeStats returns active upstream count and total client count', () => {
@@ -229,12 +208,10 @@ test('getRuntimeStats returns active upstream count and total client count', () 
     ws: {} as WebSocket,
     clientIp: '127.0.0.1'
   });
-
   upstreamA.session.attachClient({
     ws: {} as WebSocket,
     clientIp: '127.0.0.1'
   });
-
   upstreamB.session.attachClient({
     ws: {} as WebSocket,
     clientIp: '127.0.0.1'
@@ -252,40 +229,24 @@ test('getRuntimeStats returns active upstream count and total client count', () 
   assert.equal(first?.rtspUrl, 'rtsp://example.local/live/camera-01');
 });
 
-test('getTotalClientCount returns sum of all upstream client counts', () => {
+test('getSessionSnapshotByStreamId returns snapshot of active upstream', () => {
   const registry = new UpstreamRegistry({
     createSession: ({ streamId, rtspUrl }) =>
       new FakeSession({
         streamId,
         rtspUrl,
-        sessionId: `session-${streamId}`
+        sessionId: 'session-1'
       })
   });
 
-  const upstreamA = registry.getOrCreate({
+  registry.getOrCreate({
     streamId: 'camera-01',
     rtspUrl: 'rtsp://example.local/live/camera-01'
   });
 
-  const upstreamB = registry.getOrCreate({
-    streamId: 'camera-02',
-    rtspUrl: 'rtsp://example.local/live/camera-02'
-  });
+  const snapshot = registry.getSessionSnapshotByStreamId('camera-01');
 
-  upstreamA.session.attachClient({
-    ws: {} as WebSocket,
-    clientIp: '127.0.0.1'
-  });
-
-  upstreamB.session.attachClient({
-    ws: {} as WebSocket,
-    clientIp: '127.0.0.1'
-  });
-
-  upstreamB.session.attachClient({
-    ws: {} as WebSocket,
-    clientIp: '127.0.0.1'
-  });
-
-  assert.equal(registry.getTotalClientCount(), 3);
+  assert.ok(snapshot);
+  assert.equal(snapshot?.streamId, 'camera-01');
+  assert.equal(snapshot?.rtspUrl, 'rtsp://example.local/live/camera-01');
 });
