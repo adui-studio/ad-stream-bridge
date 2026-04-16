@@ -1,3 +1,9 @@
+import {
+  type LiveAccessConfig,
+  type LiveAccessMode,
+  isLiveAccessMode
+} from '../access/live-access-config.js';
+
 export interface AppEnv {
   nodeEnv: string;
   host: string;
@@ -9,6 +15,7 @@ export interface AppEnv {
   streamMaxRestarts: number;
   streamIdleTimeoutMs: number;
   streamSweepIntervalMs: number;
+  liveAccess: LiveAccessConfig;
 }
 
 const DEFAULTS = {
@@ -21,12 +28,20 @@ const DEFAULTS = {
   streamRestartDelayMs: 3000,
   streamMaxRestarts: 5,
   streamIdleTimeoutMs: 15000,
-  streamSweepIntervalMs: 10000
+  streamSweepIntervalMs: 10000,
+
+  liveAccessMode: 'off' as LiveAccessMode,
+  liveAllowDirectRtspUrl: false,
+  liveAllowedStreamIds: [] as string[],
+  trustProxyHops: 0,
+  liveProxyAllowedIps: [] as string[],
+  liveProxyRequiredHeaders: [] as string[],
+  liveSignedSecret: '',
+  liveSignedExpiresSkewSec: 30
 } as const;
 
 function readString(value: string | undefined, fallback: string): string {
   const normalized = value?.trim();
-
   return normalized || fallback;
 }
 
@@ -59,6 +74,86 @@ function readNumber(
   return parsed;
 }
 
+function readBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function readStringList(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function readLiveAccessMode(value: string | undefined, fallback: LiveAccessMode): LiveAccessMode {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  return isLiveAccessMode(normalized) ? normalized : fallback;
+}
+
+function buildLiveAccessConfig(): LiveAccessConfig {
+  const mode = readLiveAccessMode(process.env.LIVE_ACCESS_MODE, DEFAULTS.liveAccessMode);
+
+  const allowDirectRtspUrl = readBoolean(
+    process.env.LIVE_ALLOW_DIRECT_RTSP_URL,
+    DEFAULTS.liveAllowDirectRtspUrl
+  );
+
+  const allowedStreamIds = readStringList(process.env.LIVE_ALLOWED_STREAM_IDS);
+
+  const trustProxyHops = readNumber(process.env.TRUST_PROXY_HOPS, DEFAULTS.trustProxyHops, {
+    min: 0
+  });
+
+  const proxyAllowedIps = readStringList(process.env.LIVE_PROXY_ALLOWED_IPS);
+  const proxyRequiredHeaders = readStringList(process.env.LIVE_PROXY_REQUIRED_HEADERS);
+
+  const signedSecret = readString(process.env.LIVE_SIGNED_SECRET, DEFAULTS.liveSignedSecret);
+
+  const signedExpiresSkewSec = readNumber(
+    process.env.LIVE_SIGNED_EXPIRES_SKEW_SEC,
+    DEFAULTS.liveSignedExpiresSkewSec,
+    { min: 0 }
+  );
+
+  return {
+    mode,
+    allowDirectRtspUrl,
+    allowedStreamIds,
+    proxy: {
+      trustProxyHops,
+      allowedIps: proxyAllowedIps,
+      requiredHeaders: proxyRequiredHeaders
+    },
+    signed: {
+      secret: signedSecret,
+      expiresSkewSec: signedExpiresSkewSec
+    }
+  };
+}
+
 function buildEnv(): AppEnv {
   return {
     nodeEnv: readString(process.env.NODE_ENV, DEFAULTS.nodeEnv),
@@ -84,7 +179,8 @@ function buildEnv(): AppEnv {
       process.env.STREAM_SWEEP_INTERVAL_MS,
       DEFAULTS.streamSweepIntervalMs,
       { min: 0 }
-    )
+    ),
+    liveAccess: buildLiveAccessConfig()
   };
 }
 
