@@ -1,4 +1,5 @@
 import express, { type Application, type Request, type Response } from 'express';
+import { env } from './config/env.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { registerHealthRoutes } from './routes/health.js';
 
@@ -16,6 +17,7 @@ export function createApp(): Application {
   const app = express();
 
   app.disable('x-powered-by');
+  app.set('trust proxy', env.liveAccess.proxy.trustProxyHops);
   app.use(express.json());
   app.use(requestLogger);
 
