@@ -48,10 +48,7 @@ function readString(value: string | undefined, fallback: string): string {
 function readNumber(
   value: string | undefined,
   fallback: number,
-  options?: {
-    min?: number;
-    max?: number;
-  }
+  options?: { min?: number; max?: number }
 ): number {
   if (!value) {
     return fallback;
@@ -116,40 +113,25 @@ function readLiveAccessMode(value: string | undefined, fallback: LiveAccessMode)
 function buildLiveAccessConfig(): LiveAccessConfig {
   const mode = readLiveAccessMode(process.env.LIVE_ACCESS_MODE, DEFAULTS.liveAccessMode);
 
-  const allowDirectRtspUrl = readBoolean(
-    process.env.LIVE_ALLOW_DIRECT_RTSP_URL,
-    DEFAULTS.liveAllowDirectRtspUrl
-  );
-
-  const allowedStreamIds = readStringList(process.env.LIVE_ALLOWED_STREAM_IDS);
-
-  const trustProxyHops = readNumber(process.env.TRUST_PROXY_HOPS, DEFAULTS.trustProxyHops, {
-    min: 0
-  });
-
-  const proxyAllowedIps = readStringList(process.env.LIVE_PROXY_ALLOWED_IPS);
-  const proxyRequiredHeaders = readStringList(process.env.LIVE_PROXY_REQUIRED_HEADERS);
-
-  const signedSecret = readString(process.env.LIVE_SIGNED_SECRET, DEFAULTS.liveSignedSecret);
-
-  const signedExpiresSkewSec = readNumber(
-    process.env.LIVE_SIGNED_EXPIRES_SKEW_SEC,
-    DEFAULTS.liveSignedExpiresSkewSec,
-    { min: 0 }
-  );
-
   return {
     mode,
-    allowDirectRtspUrl,
-    allowedStreamIds,
+    allowDirectRtspUrl: readBoolean(
+      process.env.LIVE_ALLOW_DIRECT_RTSP_URL,
+      DEFAULTS.liveAllowDirectRtspUrl
+    ),
+    allowedStreamIds: readStringList(process.env.LIVE_ALLOWED_STREAM_IDS),
     proxy: {
-      trustProxyHops,
-      allowedIps: proxyAllowedIps,
-      requiredHeaders: proxyRequiredHeaders
+      trustProxyHops: readNumber(process.env.TRUST_PROXY_HOPS, DEFAULTS.trustProxyHops, { min: 0 }),
+      allowedIps: readStringList(process.env.LIVE_PROXY_ALLOWED_IPS),
+      requiredHeaders: readStringList(process.env.LIVE_PROXY_REQUIRED_HEADERS)
     },
     signed: {
-      secret: signedSecret,
-      expiresSkewSec: signedExpiresSkewSec
+      secret: readString(process.env.LIVE_SIGNED_SECRET, DEFAULTS.liveSignedSecret),
+      expiresSkewSec: readNumber(
+        process.env.LIVE_SIGNED_EXPIRES_SKEW_SEC,
+        DEFAULTS.liveSignedExpiresSkewSec,
+        { min: 0 }
+      )
     }
   };
 }

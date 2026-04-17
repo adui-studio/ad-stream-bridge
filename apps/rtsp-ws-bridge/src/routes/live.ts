@@ -2,7 +2,7 @@ import type { Request } from 'express';
 import type expressWs from 'express-ws';
 import type { WebSocket } from 'ws';
 import { logger } from '@adui/logger';
-import { verifyLiveProxyAccess } from '../access/verify-live-proxy-access.js';
+import { verifyLiveSignedAccess } from '../access/verify-live-signed-access.js';
 import { bindLiveConnection } from '../bridges/rtsp-ws/live-connection.js';
 import { streamManager } from '../bridges/rtsp-ws/stream-manager.js';
 import { env } from '../config/env.js';
@@ -80,19 +80,25 @@ export function registerLiveRoutes(app: expressWs.Application): void {
       return;
     }
 
-    const accessDecision = verifyLiveProxyAccess(req, env.liveAccess);
+    const signedDecision = verifyLiveSignedAccess({
+      req,
+      streamId,
+      rtspUrl,
+      liveAccess: env.liveAccess
+    });
 
-    if (!accessDecision.allowed) {
+    if (!signedDecision.allowed) {
       logger.warn('stream websocket connection rejected', {
         streamId,
         upstreamKey: null,
         sessionId: null,
         pid: null,
-        reason: accessDecision.reason,
+        reason: signedDecision.reason,
         route: req.originalUrl,
         rawId,
         clientIp,
-        matchedHeader: accessDecision.matchedHeader ?? null
+        liveAccessMode: env.liveAccess.mode,
+        hasRtspUrl: Boolean(rtspUrl)
       });
 
       ws.close(1008, 'forbidden');
